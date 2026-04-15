@@ -15,7 +15,7 @@ sealed class Screen(
 ) {
     object Dashboard : Screen(
         route = "dashboard",
-        title = "Dashboard",
+        title = "Inicio",
         icon = Icons.Filled.Dashboard
     )
 
