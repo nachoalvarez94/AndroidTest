@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cake
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Fastfood
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LocalGroceryStore
 import androidx.compose.material.icons.filled.Search
@@ -47,7 +48,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.distridulce.model.findClientById
 import com.example.distridulce.ui.theme.BrandBlue
+import com.example.distridulce.ui.theme.IconBgBlue
 import com.example.distridulce.ui.theme.TextPrimary
 import com.example.distridulce.ui.theme.TextSecondary
 
@@ -121,9 +124,16 @@ private fun categoryIcon(category: String): ImageVector = when (category) {
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
+/**
+ * @param clientId When non-null the screen was opened from NewOrderScreen.
+ *                 A context banner is shown so the user knows which client
+ *                 they are building the order for.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CatalogScreen() {
+fun CatalogScreen(clientId: String? = null) {
+    val client = remember(clientId) { findClientById(clientId) }
+
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("Todos") }
 
@@ -148,6 +158,11 @@ fun CatalogScreen() {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             CatalogHeader()
+
+            // Show ordering context when coming from NewOrderScreen
+            if (client != null) {
+                ClientContextBanner(clientName = client.name)
+            }
             CatalogSearchBar(query = searchQuery, onQueryChange = { searchQuery = it })
             CatalogFilterRow(
                 categories      = filterCategories,
@@ -171,6 +186,49 @@ fun CatalogScreen() {
                         stock       = product.stock
                     )
                 }
+            }
+        }
+    }
+}
+
+// ── Client context banner ─────────────────────────────────────────────────────
+
+/**
+ * Shown when the catalog is opened from NewOrderScreen.
+ * Reminds the user which client they are building the order for.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ClientContextBanner(clientName: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = IconBgBlue),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Person,
+                contentDescription = null,
+                tint = BrandBlue,
+                modifier = Modifier.size(18.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    text = "Creando pedido para",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary
+                )
+                Text(
+                    text = clientName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = BrandBlue
+                )
             }
         }
     }
