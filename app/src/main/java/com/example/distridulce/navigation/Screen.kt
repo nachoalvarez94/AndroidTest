@@ -23,7 +23,10 @@ sealed class Screen(
         route = "catalog",
         title = "Catálogo",
         icon = Icons.Filled.Inventory2
-    )
+    ) {
+        /** Full route used when navigating from NewOrder with a pre-selected client. */
+        fun withClient(clientId: String) = "catalog?clientId=$clientId"
+    }
 
     object Clients : Screen(
         route = "clients",
@@ -43,7 +46,20 @@ sealed class Screen(
         icon = Icons.Filled.History
     )
 
+    /**
+     * Order-building screen reached from NewOrderScreen after selecting a client.
+     * Not shown in the sidebar — accessed only through the NewOrder flow.
+     */
+    object OrderBuilder : Screen(
+        route = "order_builder",
+        title = "Nuevo Pedido",
+        icon  = Icons.Filled.ShoppingCartCheckout
+    ) {
+        fun withClient(clientId: String) = "order_builder?clientId=$clientId"
+    }
+
     companion object {
+        /** Screens shown in the sidebar navigation. OrderBuilder is intentionally excluded. */
         val all = listOf(Dashboard, Catalog, Clients, NewOrder, History)
     }
 }
