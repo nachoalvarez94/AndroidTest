@@ -2,8 +2,10 @@ package com.example.distridulce.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.ShoppingCartCheckout
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -58,8 +60,28 @@ sealed class Screen(
         fun withClient(clientId: String) = "order_builder?clientId=$clientId"
     }
 
+    /**
+     * Payment / checkout screen — step 3 of the new-order flow.
+     * Not shown in the sidebar.
+     */
+    object Checkout : Screen(
+        route = "checkout",
+        title = "Pago",
+        icon  = Icons.Filled.Payment
+    )
+
+    /**
+     * Invoice/factura screen — final step of the new-order flow.
+     * Not shown in the sidebar.
+     */
+    object Invoice : Screen(
+        route = "invoice",
+        title = "Factura",
+        icon  = Icons.Filled.Description
+    )
+
     companion object {
-        /** Screens shown in the sidebar navigation. OrderBuilder is intentionally excluded. */
+        /** Screens shown in the sidebar navigation. Flow-only screens are intentionally excluded. */
         val all = listOf(Dashboard, Catalog, Clients, NewOrder, History)
     }
 }

@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.distridulce.model.CartItem
+import com.example.distridulce.model.OrderSession
 import com.example.distridulce.model.OrderableProduct
 import com.example.distridulce.model.ProductOption
 import com.example.distridulce.model.findClientById
@@ -73,7 +74,10 @@ import com.example.distridulce.ui.theme.TextSecondary
  * All cart state lives here; child composables receive only the data / callbacks they need.
  */
 @Composable
-fun OrderBuilderScreen(clientId: String? = null) {
+fun OrderBuilderScreen(
+    clientId: String? = null,
+    onConfirm: () -> Unit = {}
+) {
     val client = remember(clientId) { findClientById(clientId) }
 
     // ── Cart state ────────────────────────────────────────────────────────────
@@ -140,7 +144,13 @@ fun OrderBuilderScreen(clientId: String? = null) {
                 onIncrement = { key -> incrementItem(key) },
                 onDecrement = { key -> decrementItem(key) },
                 onRemove    = { key -> removeItem(key) },
-                onConfirm   = { /* TODO: persist / navigate */ }
+                onConfirm   = {
+                    // Snapshot the order into the session before navigating to checkout.
+                    OrderSession.clear()
+                    OrderSession.client    = client
+                    OrderSession.cartItems = cartItems.toList()
+                    onConfirm()
+                }
             )
         }
     }
