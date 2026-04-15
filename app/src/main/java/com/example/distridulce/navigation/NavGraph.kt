@@ -11,6 +11,8 @@ import com.example.distridulce.ui.catalog.CatalogScreen
 import com.example.distridulce.ui.clients.ClientsScreen
 import com.example.distridulce.ui.dashboard.DashboardScreen
 import com.example.distridulce.ui.history.HistoryScreen
+import com.example.distridulce.ui.orders.CheckoutScreen
+import com.example.distridulce.ui.orders.InvoiceScreen
 import com.example.distridulce.ui.orders.NewOrderScreen
 import com.example.distridulce.ui.orders.OrderBuilderScreen
 
@@ -62,7 +64,30 @@ fun NavGraph(navController: NavHostController) {
                 }
             )
         ) { backStackEntry ->
-            OrderBuilderScreen(clientId = backStackEntry.arguments?.getString("clientId"))
+            OrderBuilderScreen(
+                clientId  = backStackEntry.arguments?.getString("clientId"),
+                onConfirm = { navController.navigate(Screen.Checkout.route) }
+            )
+        }
+
+        // Step 3 of new order: choose payment method.
+        composable(Screen.Checkout.route) {
+            CheckoutScreen(
+                onConfirm = { navController.navigate(Screen.Invoice.route) },
+                onBack    = { navController.popBackStack() }
+            )
+        }
+
+        // Step 4 of new order: invoice / factura.
+        composable(Screen.Invoice.route) {
+            InvoiceScreen(
+                onNewOrder = {
+                    // Clear the back stack back to NewOrder so the user starts fresh.
+                    navController.navigate(Screen.NewOrder.route) {
+                        popUpTo(Screen.NewOrder.route) { inclusive = true }
+                    }
+                }
+            )
         }
 
         composable(Screen.History.route) {
