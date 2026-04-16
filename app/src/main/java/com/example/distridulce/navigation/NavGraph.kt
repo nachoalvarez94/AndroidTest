@@ -40,8 +40,13 @@ fun NavGraph(navController: NavHostController) {
             CatalogScreen(clientId = backStackEntry.arguments?.getString("clientId"))
         }
 
+        // Clients list — "Nuevo Pedido" skips client selection and goes straight to OrderBuilder.
         composable(Screen.Clients.route) {
-            ClientsScreen()
+            ClientsScreen(
+                onNewOrder = { client: Client ->
+                    navController.navigate(Screen.OrderBuilder.withClient(client.id))
+                }
+            )
         }
 
         // Step 1 of new order: choose client → navigate to OrderBuilder.
