@@ -98,9 +98,20 @@ fun NavGraph(navController: NavHostController) {
             CheckoutScreen(
                 onConfirm = {
                     navController.navigate(Screen.Orders.route) {
-                        // Clear the new-order back stack so Back doesn't re-enter
-                        // the builder or checkout after the order is submitted.
-                        popUpTo(Screen.NewOrder.route) { inclusive = true }
+                        // Pop ALL the way back to the graph's start destination
+                        // (Dashboard), regardless of how the order flow was entered.
+                        //
+                        // Using popUpTo(NewOrder) was a silent no-op when the flow
+                        // started from ClientsScreen — NewOrder is never in the back
+                        // stack in that case. That left Clients → OrderBuilder →
+                        // Checkout in the stack, which the Sidebar then saved as the
+                        // "Clients tab" state and restored on the next sidebar tap,
+                        // landing the user back at Orders instead of Clients.
+                        //
+                        // Popping to the start destination always works and produces
+                        // a clean stack: Dashboard → Orders.
+                        popUpTo(navController.graph.startDestinationId) { inclusive = false }
+                        launchSingleTop = true
                     }
                 },
                 onBack   = { navController.popBackStack() },
