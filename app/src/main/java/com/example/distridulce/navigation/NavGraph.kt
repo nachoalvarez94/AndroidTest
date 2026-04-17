@@ -1,6 +1,10 @@
 package com.example.distridulce.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -13,10 +17,13 @@ import com.example.distridulce.ui.clients.ClientsScreen
 import com.example.distridulce.ui.dashboard.DashboardScreen
 import com.example.distridulce.ui.history.HistoryScreen
 import com.example.distridulce.ui.orders.CheckoutScreen
+import com.example.distridulce.ui.orders.EditOrderScreen
+import com.example.distridulce.ui.orders.EditOrderViewModel
 import com.example.distridulce.ui.orders.InvoiceScreen
 import com.example.distridulce.ui.orders.NewOrderScreen
 import com.example.distridulce.ui.orders.OrderBuilderScreen
 import com.example.distridulce.ui.orders.OrdersScreen
+import com.example.distridulce.ui.orders.OrdersViewModel
 
 @Composable
 fun NavGraph(navController: NavHostController) {
@@ -144,15 +151,59 @@ fun NavGraph(navController: NavHostController) {
         }
 
         // Orders management — list of all orders with invoicing actions.
-        composable(Screen.Orders.route) {
+        //
+        // The ViewModel is created at the back-stack-entry scope so that the
+        // edit-order screen can signal back a refresh via savedStateHandle.
+        composable(Screen.Orders.route) { backStackEntry ->
+            val ordersViewModel: OrdersViewModel = viewModel(backStackEntry)
+
+            // Refresh signal set by EditOrderScreen on a successful save.
+            val shouldRefresh by backStackEntry.savedStateHandle
+                .getStateFlow("should_refresh_orders", false)
+                .collectAsState()
+            LaunchedEffect(shouldRefresh) {
+                if (shouldRefresh) {
+                    ordersViewModel.loadData()
+                    backStackEntry.savedStateHandle["should_refresh_orders"] = false
+                }
+            }
+
             OrdersScreen(
                 onViewFactura = { facturaId ->
                     // Seed the session so InvoiceViewModel uses GET instead of POST.
-                    OrderSession.facturaId     = facturaId
-                    OrderSession.pedidoId      = null
+                    OrderSession.facturaId      = facturaId
+                    OrderSession.pedidoId       = null
                     OrderSession.paymentSummary = null
                     navController.navigate(Screen.Invoice.route)
-                }
+                },
+                onModificar = { pedidoId ->
+                    navController.navigate(Screen.EditOrder.withId(pedidoId))
+                },
+                viewModel = ordersViewModel
+            )
+        }
+
+        // Edit order — reached from OrdersScreen "Modificar" on non-invoiced orders.
+        // On save: signals Orders to refresh via savedStateHandle, then pops back.
+        composable(
+            route = "edit_order/{pedidoId}",
+            arguments = listOf(
+                navArgument("pedidoId") { type = NavType.LongType }
+            )
+        ) { backStackEntry ->
+            val pedidoId = backStackEntry.arguments!!.getLong("pedidoId")
+            EditOrderScreen(
+                viewModel = viewModel(
+                    factory = EditOrderViewModel.Factory(pedidoId)
+                ),
+                onSaved = {
+                    // Signal the Orders back-stack entry to reload its list.
+                    navController.previousBackStackEntry
+                        ?.savedStateHandle
+                        ?.set("should_refresh_orders", true)
+                    navController.popBackStack()
+                },
+                onBack = { navController.popBackStack() }
             )
         }
 

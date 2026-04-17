@@ -55,7 +55,6 @@ import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.distridulce.model.OrderSession
-import com.example.distridulce.model.PaymentSummary
 import com.example.distridulce.network.dto.FacturaLineaResponseDto
 import com.example.distridulce.network.dto.FacturaResponseDto
 import com.example.distridulce.ui.theme.BackgroundLight
@@ -72,8 +71,8 @@ import java.util.Locale
  *
  * [InvoiceViewModel] calls POST /api/facturas/desde-pedido/{pedidoId} on first
  * open and caches the result in [OrderSession] to prevent duplicate creation
- * on revisit.  [PaymentSummary] from the session drives the payment status UI
- * (the backend does not yet receive the payment breakdown).
+ * on revisit.  Payment status is read from the associated Pedido via a second
+ * GET request — FacturaResponseDto does not carry estadoCobro / importeCobrado.
  */
 @Composable
 fun InvoiceScreen(
@@ -81,8 +80,7 @@ fun InvoiceScreen(
     onNewOrder: () -> Unit = {},
     viewModel: InvoiceViewModel = viewModel()
 ) {
-    val uiState        by viewModel.uiState.collectAsState()
-    val paymentSummary  = OrderSession.paymentSummary
+    val uiState by viewModel.uiState.collectAsState()
 
     Surface(modifier = Modifier.fillMaxSize(), color = BackgroundLight) {
         // Back button overlay — always accessible regardless of load state
@@ -97,10 +95,12 @@ fun InvoiceScreen(
                 )
 
                 is InvoiceUiState.Success -> InvoiceSuccessContent(
-                    factura        = state.factura,
-                    paymentSummary = paymentSummary,
-                    onBack         = onBack,
-                    onNewOrder     = {
+                    factura          = state.factura,
+                    estadoCobro      = state.estadoCobro,
+                    importeCobrado   = state.importeCobrado,
+                    importePendiente = state.importePendiente,
+                    onBack           = onBack,
+                    onNewOrder       = {
                         OrderSession.clear()
                         onNewOrder()
                     }
@@ -190,7 +190,9 @@ private fun InvoiceErrorContent(message: String, onRetry: () -> Unit, onBack: ()
 @Composable
 private fun InvoiceSuccessContent(
     factura: FacturaResponseDto,
-    paymentSummary: PaymentSummary?,
+    estadoCobro: String?,
+    importeCobrado: Double?,
+    importePendiente: Double?,
     onBack: () -> Unit = {},
     onNewOrder: () -> Unit
 ) {
@@ -208,7 +210,7 @@ private fun InvoiceSuccessContent(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // ── Status header ─────────────────────────────────────────────────
-            InvoiceStatusHeader(paymentSummary = paymentSummary)
+            InvoiceStatusHeader(estadoCobro = estadoCobro)
 
             // ── Invoice card ──────────────────────────────────────────────────
             Card(
@@ -249,10 +251,12 @@ private fun InvoiceSuccessContent(
 
                     // Totals + payment summary
                     InvoiceSummarySection(
-                        paymentSummary = paymentSummary,
-                        baseImponible  = factura.baseImponible,
-                        impuestos      = factura.impuestos,
-                        totalFinal     = factura.total
+                        estadoCobro      = estadoCobro,
+                        importeCobrado   = importeCobrado,
+                        importePendiente = importePendiente,
+                        baseImponible    = factura.baseImponible,
+                        impuestos        = factura.impuestos,
+                        totalFinal       = factura.total
                     )
                 }
             }
@@ -315,22 +319,27 @@ private fun InvoiceSuccessContent(
 // ── Status header ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun InvoiceStatusHeader(paymentSummary: PaymentSummary?) {
-    val (icon, iconBg, iconTint, label) = when (paymentSummary?.paymentStatus) {
-        "Pagado Completo" -> StatusVisuals(
+private fun InvoiceStatusHeader(estadoCobro: String?) {
+    val (icon, iconBg, iconTint, label) = when (estadoCobro) {
+        "COMPLETO"  -> StatusVisuals(
             Icons.Filled.CheckCircle,
             Color(0xFFD1FAE5), Color(0xFF059669),
             "Pagado completo"
         )
-        "Pago Parcial"    -> StatusVisuals(
+        "PARCIAL"   -> StatusVisuals(
             Icons.Filled.Tune,
             Color(0xFFDCEBFD), BrandBlue,
             "Pago parcial registrado"
         )
-        else              -> StatusVisuals(
+        "PENDIENTE" -> StatusVisuals(
             Icons.Filled.Schedule,
             Color(0xFFFEF3C7), Color(0xFFD97706),
             "Pago pendiente"
+        )
+        else        -> StatusVisuals(
+            Icons.Filled.Schedule,
+            Color(0xFFECEFF1), Color(0xFF546E7A),
+            "Estado de cobro no disponible"
         )
     }
 
@@ -566,24 +575,31 @@ private fun InvoiceProductsTable(lineas: List<FacturaLineaResponseDto>) {
 /**
  * The fiscal totals + payment state block at the bottom of the invoice.
  *
- * @param paymentSummary   App-side payment selection; drives the abonado/pendiente rows
- *                         and the status badge.  May be null if the session was cleared.
+ * Payment fields come from the Pedido associated with this invoice — the Factura
+ * DTO does not carry them.  All three are nullable for legacy orders.
+ *
+ * @param estadoCobro      "COMPLETO", "PARCIAL", "PENDIENTE", or null.
+ * @param importeCobrado   Amount actually collected; null for legacy records.
+ * @param importePendiente Remaining balance; null for legacy records.
  * @param baseImponible    Tax base from the backend.
  * @param impuestos        Tax amount from the backend.
  * @param totalFinal       Grand total from the backend (authoritative figure).
  */
 @Composable
 fun InvoiceSummarySection(
-    paymentSummary: PaymentSummary?,
+    estadoCobro: String?,
+    importeCobrado: Double?,
+    importePendiente: Double?,
     baseImponible: Double,
     impuestos: Double,
     totalFinal: Double,
     modifier: Modifier = Modifier
 ) {
-    val (statusBg, statusFg) = when (paymentSummary?.paymentStatus) {
-        "Pagado Completo" -> Color(0xFFD1FAE5) to Color(0xFF059669)
-        "Pago Parcial"    -> Color(0xFFDCEBFD) to BrandBlue
-        else              -> Color(0xFFFEF3C7) to Color(0xFFD97706)
+    val (statusBg, statusFg, statusLabel) = when (estadoCobro) {
+        "COMPLETO"  -> Triple(Color(0xFFD1FAE5), Color(0xFF059669), "Pagado completo")
+        "PARCIAL"   -> Triple(Color(0xFFDCEBFD), BrandBlue,         "Pago parcial")
+        "PENDIENTE" -> Triple(Color(0xFFFEF3C7), Color(0xFFD97706), "Pago pendiente")
+        else        -> Triple(Color(0xFFECEFF1), Color(0xFF546E7A), "Desconocido")
     }
 
     Column(
@@ -596,43 +612,49 @@ fun InvoiceSummarySection(
 
         Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
 
-        // Payment breakdown (from app-side PaymentSummary)
-        if (paymentSummary != null) {
-            SummaryRow(
-                label      = "Importe abonado",
-                value      = "€ %.2f".format(paymentSummary.paidAmount),
-                valueColor = if (paymentSummary.paidAmount > 0) Color(0xFF059669) else TextSecondary
-            )
-            SummaryRow(
-                label      = "Importe pendiente",
-                value      = "€ %.2f".format(paymentSummary.pendingAmount),
-                valueColor = if (paymentSummary.pendingAmount > 0) Color(0xFFD97706) else TextSecondary
-            )
+        // Payment breakdown (from the associated Pedido)
+        SummaryRow(
+            label      = "Importe abonado",
+            value      = importeCobrado?.let { "€ %.2f".format(it) } ?: "—",
+            valueColor = when {
+                importeCobrado == null -> TextSecondary
+                importeCobrado > 0    -> Color(0xFF059669)
+                else                  -> TextSecondary
+            }
+        )
+        SummaryRow(
+            label      = "Importe pendiente",
+            value      = importePendiente?.let { "€ %.2f".format(it) } ?: "—",
+            valueColor = when {
+                importePendiente == null  -> TextSecondary
+                importePendiente > 0.0   -> Color(0xFFD97706)
+                else                     -> TextSecondary
+            }
+        )
 
-            // Estado de pago badge
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        // Estado de pago badge
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text  = "Estado de pago",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(statusBg)
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
             ) {
                 Text(
-                    text  = "Estado de pago",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary
+                    text  = statusLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = statusFg
                 )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(statusBg)
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text  = paymentSummary.paymentStatus,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = statusFg
-                    )
-                }
             }
         }
 

@@ -9,8 +9,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-// All icons used: Assignment, CheckCircle, Close, CloudOff, Construction, Description,
-// Edit, Error, Inbox, Person, Receipt, Refresh, Schedule, Share, Visibility, Lock
+// All icons used: Assignment, CheckCircle, Close, CloudOff, Description,
+// Edit, Error, Inbox, Lock, Person, Receipt, Refresh, Schedule, Share, Visibility
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -46,6 +46,7 @@ private val ColorTextSecondary = Color(0xFF757575)
 @Composable
 fun OrdersScreen(
     onViewFactura: (facturaId: Long) -> Unit,
+    onModificar: (pedidoId: Long) -> Unit = {},
     viewModel: OrdersViewModel = viewModel()
 ) {
     val uiState     by viewModel.uiState.collectAsState()
@@ -73,10 +74,11 @@ fun OrdersScreen(
                         OrdersEmptyContent(state.filterLast24h, viewModel::toggleFilter)
                     } else {
                         OrdersList(
-                            pedidos       = state.pedidos,
-                            billing       = billing,
-                            onFacturar    = viewModel::facturarPedido,
-                            onViewFactura = onViewFactura,
+                            pedidos        = state.pedidos,
+                            billing        = billing,
+                            onFacturar     = viewModel::facturarPedido,
+                            onViewFactura  = onViewFactura,
+                            onModificar    = onModificar,
                             onDismissError = viewModel::dismissBillingError
                         )
                     }
@@ -167,6 +169,7 @@ private fun OrdersList(
     billing: BillingAction,
     onFacturar: (Long) -> Unit,
     onViewFactura: (Long) -> Unit,
+    onModificar: (Long) -> Unit,
     onDismissError: () -> Unit
 ) {
     // Show billing error snackbar
@@ -187,7 +190,8 @@ private fun OrdersList(
                 pedido        = pedido,
                 billing       = billing,
                 onFacturar    = onFacturar,
-                onViewFactura = onViewFactura
+                onViewFactura = onViewFactura,
+                onModificar   = onModificar
             )
         }
     }
@@ -200,10 +204,10 @@ private fun PedidoCard(
     pedido: PedidoUiModel,
     billing: BillingAction,
     onFacturar: (Long) -> Unit,
-    onViewFactura: (Long) -> Unit
+    onViewFactura: (Long) -> Unit,
+    onModificar: (Long) -> Unit
 ) {
-    var showModifyDialog by remember { mutableStateOf(false) }
-    var showShareDialog  by remember { mutableStateOf(false) }
+    var showShareDialog by remember { mutableStateOf(false) }
 
     val isBillingThis = billing is BillingAction.InProgress &&
             (billing as BillingAction.InProgress).pedidoId == pedido.pedidoId
@@ -343,7 +347,7 @@ private fun PedidoCard(
                 if (pedido.factura == null) {
                     // Not invoiced: Modificar + Facturar
                     OutlinedButton(
-                        onClick  = { showModifyDialog = true },
+                        onClick  = { onModificar(pedido.pedidoId) },
                         modifier = Modifier.height(36.dp),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp)
                     ) {
@@ -475,25 +479,6 @@ private fun PedidoCard(
     }
 
     // ── Dialogs ───────────────────────────────────────────────────────────────
-
-    if (showModifyDialog) {
-        AlertDialog(
-            onDismissRequest = { showModifyDialog = false },
-            icon   = { Icon(Icons.Filled.Construction, contentDescription = null) },
-            title  = { Text("Función no disponible") },
-            text   = {
-                Text(
-                    "La edición de pedidos ya facturados estará disponible en una próxima versión.",
-                    fontSize = 14.sp
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showModifyDialog = false }) {
-                    Text("Entendido")
-                }
-            }
-        )
-    }
 
     if (showShareDialog) {
         AlertDialog(

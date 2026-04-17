@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.distridulce.model.OrderSession
 import com.example.distridulce.network.dto.FacturaResponseDto
 import com.example.distridulce.repository.FacturaRepository
+import com.example.distridulce.repository.PedidoRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,8 +17,19 @@ sealed class InvoiceUiState {
     /** Invoice is being generated / fetched. */
     object Loading : InvoiceUiState()
 
-    /** Invoice created and ready to display. */
-    data class Success(val factura: FacturaResponseDto) : InvoiceUiState()
+    /**
+     * Invoice created and ready to display.
+     *
+     * Payment fields ([estadoCobro], [importeCobrado], [importePendiente]) come
+     * from the associated Pedido — the Factura DTO does not carry them.
+     * All three are nullable to handle legacy orders that predate the fields.
+     */
+    data class Success(
+        val factura: FacturaResponseDto,
+        val estadoCobro: String?,
+        val importeCobrado: Double?,
+        val importePendiente: Double?
+    ) : InvoiceUiState()
 
     /** Network or server error. */
     data class Error(val message: String) : InvoiceUiState()
@@ -51,7 +63,18 @@ class InvoiceViewModel : ViewModel() {
                 // Cache the IDs so a subsequent call uses GET instead of POST.
                 OrderSession.facturaId     = factura.id
                 OrderSession.facturaNumero = factura.numeroFactura
-                _uiState.value = InvoiceUiState.Success(factura)
+
+                // Fetch the associated pedido to get the real payment status.
+                // FacturaResponseDto does not carry estadoCobro / importeCobrado /
+                // importePendiente — those fields live on the Pedido.
+                val pedido = PedidoRepository.getPedidoById(factura.pedidoId)
+
+                _uiState.value = InvoiceUiState.Success(
+                    factura          = factura,
+                    estadoCobro      = pedido.estadoCobro,
+                    importeCobrado   = pedido.importeCobrado,
+                    importePendiente = pedido.importePendiente
+                )
             } catch (e: Exception) {
                 val message = when {
                     e.message?.contains("Unable to resolve host") == true ->

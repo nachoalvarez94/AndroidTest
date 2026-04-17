@@ -5,6 +5,7 @@ import com.example.distridulce.network.dto.PedidoResponseDto
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 
 /**
@@ -23,4 +24,11 @@ interface PedidosApi {
     /** Creates a new order and returns the persisted entity with its backend ID. */
     @POST("api/pedidos")
     suspend fun createPedido(@Body request: PedidoRequestDto): PedidoResponseDto
+
+    /** Updates an existing order and returns the refreshed entity. */
+    @PUT("api/pedidos/{id}")
+    suspend fun updatePedido(
+        @Path("id") id: Long,
+        @Body request: PedidoRequestDto
+    ): PedidoResponseDto
 }
