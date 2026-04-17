@@ -30,16 +30,16 @@ data class PedidoUiModel(
     val estado: String,             // raw backend value: "PENDIENTE", "CONFIRMADO" …
     val factura: FacturaUiSummary?, // null = not yet invoiced
     /**
-     * Three-valued payment state:
-     *   true  = confirmed fully paid (recorded in [OrderSession.pagoCompleto])
-     *   false = confirmed NOT fully paid (partial or pending payment)
-     *   null  = unknown — order was not created in this session and the backend
-     *           does not yet expose a payment-status field.
+     * Three-valued payment state derived from the backend [estadoCobro] field,
+     * with [OrderSession.pagoCompleto] as a same-session fallback for orders
+     * created before the backend persisted the field:
+     *
+     *   true  = "COMPLETO" — fully paid
+     *   false = "PARCIAL" or "PENDIENTE" — not fully paid
+     *   null  = unknown — legacy record with no payment data in backend or session
      *
      * Invoicing is only allowed when this is explicitly `true`.
      * Both `false` and `null` block the "Facturar" button with different messages.
-     *
-     * TODO: replace with a real backend field when the API exposes it.
      */
     val cobrado: Boolean?
 )
@@ -149,10 +149,15 @@ class OrdersViewModel : ViewModel() {
                             total         = pedido.totalFinal,
                             estado        = pedido.estado,
                             factura  = facturaByPedidoId[pedido.id],
-                            // null when the order was not created in this session —
-                            // the backend does not yet send a payment-status field.
+                            // Primary source: estadoCobro from the backend response.
+                            // Fallback: OrderSession.pagoCompleto for orders created
+                            // in this session whose backend record predates the field.
                             // Never default to true: unknown ≠ paid.
-                            cobrado  = OrderSession.pagoCompleto[pedido.id]
+                            cobrado  = when (pedido.estadoCobro) {
+                                "COMPLETO"            -> true
+                                "PARCIAL", "PENDIENTE" -> false
+                                else                   -> OrderSession.pagoCompleto[pedido.id]
+                            }
                         )
                     }
                     .sortedByDescending { it.fechaTimestamp }
@@ -187,9 +192,9 @@ class OrdersViewModel : ViewModel() {
         if (_billingAction.value is BillingAction.InProgress) return  // guard double-tap
 
         // Business rule: only fully-paid orders can be invoiced.
-        // cobrado == true  → paid, allow
-        // cobrado == false → known unpaid, block
-        // cobrado == null  → unknown (order from a previous session), block
+        // cobrado == true  → backend says COMPLETO, allow
+        // cobrado == false → backend says PARCIAL / PENDIENTE, block
+        // cobrado == null  → no payment data in backend or session (legacy), block
         val pedido = allPedidos.find { it.pedidoId == pedidoId }
         if (pedido != null && pedido.cobrado != true) {
             val msg = if (pedido.cobrado == false)

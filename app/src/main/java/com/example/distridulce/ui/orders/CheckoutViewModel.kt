@@ -61,7 +61,7 @@ class CheckoutViewModel : ViewModel() {
         viewModelScope.launch {
             _submitState.value = SubmitState.Submitting
             try {
-                val response = PedidoRepository.createPedido(clienteId, cartItems)
+                val response = PedidoRepository.createPedido(clienteId, cartItems, paymentSummary)
 
                 // Persist order data in the session.
                 OrderSession.paymentSummary = paymentSummary

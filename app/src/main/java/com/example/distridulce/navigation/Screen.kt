@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Payment
@@ -86,6 +87,19 @@ sealed class Screen(
         title = "Factura",
         icon  = Icons.Filled.Description
     )
+
+    /**
+     * Edit-order screen — reached from OrdersScreen via the "Modificar" button.
+     * Only available for non-invoiced orders. Not shown in the sidebar.
+     */
+    object EditOrder : Screen(
+        route = "edit_order",
+        title = "Editar Pedido",
+        icon  = Icons.Filled.Edit
+    ) {
+        /** Full route used when navigating to the edit screen with a specific pedido. */
+        fun withId(pedidoId: Long) = "edit_order/$pedidoId"
+    }
 
     companion object {
         /** Screens shown in the sidebar navigation. Flow-only screens are intentionally excluded. */

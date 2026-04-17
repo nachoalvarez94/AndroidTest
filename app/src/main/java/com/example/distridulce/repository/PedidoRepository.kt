@@ -1,7 +1,9 @@
 package com.example.distridulce.repository
 
 import com.example.distridulce.model.CartItem
+import com.example.distridulce.model.PaymentSummary
 import com.example.distridulce.network.RetrofitClient
+import com.example.distridulce.network.dto.PedidoRequestDto
 import com.example.distridulce.network.dto.PedidoResponseDto
 import com.example.distridulce.network.mapper.toPedidoRequest
 
@@ -28,8 +30,19 @@ object PedidoRepository {
     suspend fun createPedido(
         clienteId: Long,
         cartItems: List<CartItem>,
+        paymentSummary: PaymentSummary? = null,
         observaciones: String? = null
     ): PedidoResponseDto = api.createPedido(
-        cartItems.toPedidoRequest(clienteId, observaciones)
+        cartItems.toPedidoRequest(clienteId, observaciones, paymentSummary)
     )
+
+    /**
+     * Updates an existing order via PUT /api/pedidos/{id}.
+     *
+     * The [request] is built directly by the caller (typically [EditOrderViewModel])
+     * with `estadoCobro = null` so the backend recalculates it from [importeCobrado]
+     * and the order total.
+     */
+    suspend fun updatePedido(id: Long, request: PedidoRequestDto): PedidoResponseDto =
+        api.updatePedido(id, request)
 }
