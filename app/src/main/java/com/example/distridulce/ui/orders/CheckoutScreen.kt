@@ -21,29 +21,38 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,14 +82,25 @@ import com.example.distridulce.ui.theme.TextSecondary
 @Composable
 fun CheckoutScreen(
     onConfirm: () -> Unit = {},
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    onCancel: () -> Unit = {},
+    viewModel: CheckoutViewModel = viewModel()
 ) {
     val session     = OrderSession
     val totalAmount = remember { session.cartItems.sumOf { it.lineTotal } }
+    val submitState by viewModel.submitState.collectAsState()
+
+    // ── Navigate on successful submission ─────────────────────────────────────
+    LaunchedEffect(submitState) {
+        if (submitState is SubmitState.Success) {
+            viewModel.resetState()
+            onConfirm()
+        }
+    }
 
     // ── Payment state ─────────────────────────────────────────────────────────
-    var selectedMethod      by remember { mutableStateOf<PaymentMethod?>(null) }
-    var partialAmountText   by remember { mutableStateOf("") }
+    var selectedMethod    by remember { mutableStateOf<PaymentMethod?>(null) }
+    var partialAmountText by remember { mutableStateOf("") }
 
     // Validate partial input — only evaluated when method is PARTIAL
     val partialAmount: Double? by remember(partialAmountText) {
@@ -91,18 +111,21 @@ fun CheckoutScreen(
         derivedStateOf {
             if (selectedMethod != PaymentMethod.PARTIAL) return@derivedStateOf null
             when {
-                partialAmountText.isBlank()      -> null // not yet touched
-                partialAmount == null            -> "Introduce un número válido"
-                partialAmount!! <= 0.0           -> "El importe debe ser mayor que 0"
-                partialAmount!! >= totalAmount   -> "El importe debe ser menor que el total (usa Pago Completo)"
-                else                             -> null
+                partialAmountText.isBlank()    -> null // not yet touched
+                partialAmount == null          -> "Introduce un número válido"
+                partialAmount!! <= 0.0         -> "El importe debe ser mayor que 0"
+                partialAmount!! >= totalAmount -> "El importe debe ser menor que el total (usa Pago Completo)"
+                else                           -> null
             }
         }
     }
 
-    val canConfirm by remember(selectedMethod, partialAmountText, partialAmount, partialError) {
+    var showCancelDialog by remember { mutableStateOf(false) }
+    val isSubmitting = submitState is SubmitState.Submitting
+
+    val canConfirm by remember(selectedMethod, partialAmountText, partialAmount, partialError, isSubmitting) {
         derivedStateOf {
-            when (selectedMethod) {
+            !isSubmitting && when (selectedMethod) {
                 PaymentMethod.FULL, PaymentMethod.PENDING -> true
                 PaymentMethod.PARTIAL ->
                     partialAmount != null &&
@@ -114,7 +137,7 @@ fun CheckoutScreen(
         }
     }
 
-    // ── Build payment summary and navigate ────────────────────────────────────
+    // ── Build payment summary and call backend ────────────────────────────────
     fun confirm() {
         val summary = when (selectedMethod) {
             PaymentMethod.FULL    -> PaymentSummary.full(totalAmount)
@@ -122,9 +145,38 @@ fun CheckoutScreen(
             PaymentMethod.PENDING -> PaymentSummary.pending(totalAmount)
             null                  -> return
         }
-        session.paymentSummary = summary
-        session.invoiceRef     = "INV-${(100000..999999).random()}"
-        onConfirm()
+        val clienteId = session.client?.id?.toLongOrNull() ?: 0L
+        viewModel.submitOrder(clienteId, session.cartItems, summary)
+    }
+
+    // ── Cancel confirmation dialog ────────────────────────────────────────────
+    if (showCancelDialog) {
+        AlertDialog(
+            onDismissRequest = { showCancelDialog = false },
+            icon   = { Icon(Icons.Filled.Cancel, contentDescription = null, tint = Color(0xFFDC2626)) },
+            title  = { Text("¿Cancelar el pedido?") },
+            text   = {
+                Text(
+                    "Se descartarán todos los productos añadidos al carrito " +
+                    "y volverás a la selección de clientes.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showCancelDialog = false
+                        onCancel()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) { Text("Sí, cancelar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelDialog = false }) {
+                    Text("No, continuar")
+                }
+            }
+        )
     }
 
     // ── UI ────────────────────────────────────────────────────────────────────
@@ -149,18 +201,22 @@ fun CheckoutScreen(
 
             // ── Right: payment selection ──────────────────────────────────────
             PaymentPanel(
-                modifier            = Modifier.weight(0.45f),
-                totalAmount         = totalAmount,
-                selectedMethod      = selectedMethod,
-                partialAmountText   = partialAmountText,
-                partialError        = partialError,
-                canConfirm          = canConfirm,
-                onMethodSelected    = { method ->
+                modifier              = Modifier.weight(0.45f),
+                totalAmount           = totalAmount,
+                selectedMethod        = selectedMethod,
+                partialAmountText     = partialAmountText,
+                partialError          = partialError,
+                canConfirm            = canConfirm,
+                isSubmitting          = isSubmitting,
+                submitError           = (submitState as? SubmitState.Error)?.message,
+                onMethodSelected      = { method ->
                     selectedMethod    = method
                     partialAmountText = ""   // reset input on method change
                 },
                 onPartialAmountChange = { partialAmountText = it },
-                onConfirm           = { confirm() }
+                onConfirm             = { confirm() },
+                onCancel              = { showCancelDialog = true },
+                onDismissError        = { viewModel.dismissError() }
             )
         }
     }
@@ -295,9 +351,13 @@ private fun PaymentPanel(
     partialAmountText: String,
     partialError: String?,
     canConfirm: Boolean,
+    isSubmitting: Boolean,
+    submitError: String?,
     onMethodSelected: (PaymentMethod) -> Unit,
     onPartialAmountChange: (String) -> Unit,
-    onConfirm: () -> Unit
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+    onDismissError: () -> Unit
 ) {
     Column(
         modifier = modifier
@@ -364,6 +424,46 @@ private fun PaymentPanel(
 
         Spacer(modifier = Modifier.weight(1f))
 
+        // ── Error banner ──────────────────────────────────────────────────────
+        if (submitError != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape    = RoundedCornerShape(12.dp),
+                colors   = CardDefaults.cardColors(containerColor = Color(0xFFFEE2E2)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.ErrorOutline,
+                        contentDescription = null,
+                        tint = Color(0xFFDC2626),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = submitError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFDC2626),
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = onDismissError,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.CheckCircle,   // reuse available icon as ✕
+                            contentDescription = "Cerrar",
+                            tint = Color(0xFFDC2626),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+
         // ── Confirm button ────────────────────────────────────────────────────
         Button(
             onClick  = onConfirm,
@@ -373,15 +473,50 @@ private fun PaymentPanel(
             contentPadding = PaddingValues(vertical = 14.dp),
             colors   = ButtonDefaults.buttonColors(containerColor = BrandBlue)
         ) {
+            if (isSubmitting) {
+                CircularProgressIndicator(
+                    modifier    = Modifier.size(18.dp),
+                    color       = Color.White,
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text  = "Enviando pedido…",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text  = "Confirmar Pedido",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        }
+
+        // ── Cancel order ──────────────────────────────────────────────────────
+        OutlinedButton(
+            onClick  = onCancel,
+            enabled  = !isSubmitting,
+            modifier = Modifier.fillMaxWidth(),
+            shape    = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(vertical = 12.dp)
+        ) {
             Icon(
-                imageVector = Icons.Filled.Receipt,
+                imageVector = Icons.Filled.Cancel,
                 contentDescription = null,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(16.dp),
+                tint = Color(0xFFDC2626)
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text  = "Confirmar y Generar Factura",
-                style = MaterialTheme.typography.labelLarge
+                text  = "Cancelar pedido",
+                style = MaterialTheme.typography.labelLarge,
+                color = Color(0xFFDC2626)
             )
         }
     }

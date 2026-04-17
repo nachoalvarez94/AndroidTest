@@ -20,26 +20,35 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cake
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Fastfood
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LocalGroceryStore
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,14 +60,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.distridulce.model.CartItem
 import com.example.distridulce.model.OrderSession
 import com.example.distridulce.model.OrderableProduct
 import com.example.distridulce.model.ProductOption
 import com.example.distridulce.model.findClientById
-import com.example.distridulce.model.sampleOrderProducts
+import com.example.distridulce.model.toOrderableProduct
+import com.example.distridulce.ui.catalog.CatalogUiState
+import com.example.distridulce.ui.catalog.CatalogViewModel
 import com.example.distridulce.ui.theme.BackgroundLight
 import com.example.distridulce.ui.theme.BrandBlue
 import com.example.distridulce.ui.theme.TextPrimary
@@ -68,17 +81,68 @@ import com.example.distridulce.ui.theme.TextSecondary
 
 /**
  * Full-screen split panel:
- *  - Left (60 %) — product catalogue with search, category filters and a grid of [ProductOrderCard]s.
+ *  - Left (60 %) — product catalogue loaded from the backend, with search and
+ *    category filters.  Uses [CatalogViewModel] to drive Loading / Error / Success states.
  *  - Right (40 %) — live cart managed by [CartPanel].
  *
- * All cart state lives here; child composables receive only the data / callbacks they need.
+ * Products are mapped from [CatalogProduct] to [OrderableProduct] (single "Por Unidades"
+ * option) so the existing [AddProductDialog] and cart logic are reused unchanged.
+ * [CartItem.articuloId] is populated with the real backend article ID.
  */
 @Composable
 fun OrderBuilderScreen(
     clientId: String? = null,
-    onConfirm: () -> Unit = {}
+    onConfirm: () -> Unit = {},
+    onCancel: () -> Unit = {},
+    viewModel: CatalogViewModel = viewModel()
 ) {
-    val client = remember(clientId) { findClientById(clientId) }
+    val uiState by viewModel.uiState.collectAsState()
+
+    // Prefer the client already stored in the session (set by NavGraph before
+    // navigating here). Fall back to the mock lookup for the standalone catalog
+    // entry point where no session client exists.
+    val client = remember(clientId) {
+        OrderSession.client?.takeIf { it.id == clientId } ?: findClientById(clientId)
+    }
+
+    // Map backend products to the OrderableProduct shape expected by this screen.
+    val orderableProducts = remember(uiState) {
+        (uiState as? CatalogUiState.Success)
+            ?.products
+            ?.map { it.toOrderableProduct() }
+            ?: emptyList()
+    }
+
+    // ── Cancel confirmation dialog ────────────────────────────────────────────
+    var showCancelDialog by remember { mutableStateOf(false) }
+    if (showCancelDialog) {
+        AlertDialog(
+            onDismissRequest = { showCancelDialog = false },
+            icon   = { Icon(Icons.Filled.Close, contentDescription = null, tint = Color(0xFFDC2626)) },
+            title  = { Text("¿Cancelar el pedido?") },
+            text   = {
+                Text(
+                    "Se descartarán todos los productos añadidos y volverás " +
+                    "a la selección de clientes.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showCancelDialog = false
+                        onCancel()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) { Text("Sí, cancelar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelDialog = false }) {
+                    Text("No, continuar")
+                }
+            }
+        )
+    }
 
     // ── Cart state ────────────────────────────────────────────────────────────
     val cartItems = remember { mutableStateListOf<CartItem>() }
@@ -91,7 +155,15 @@ fun OrderBuilderScreen(
         if (idx >= 0) {
             cartItems[idx] = cartItems[idx].copy(quantity = cartItems[idx].quantity + 1)
         } else {
-            cartItems.add(CartItem(product.id, product.name, option))
+            cartItems.add(
+                CartItem(
+                    productId   = product.id,
+                    productName = product.name,
+                    option      = option,
+                    // Carry the real backend article ID so PedidoMapper can use it.
+                    articuloId  = product.id.toLongOrNull()
+                )
+            )
         }
     }
 
@@ -124,8 +196,13 @@ fun OrderBuilderScreen(
         Row(modifier = Modifier.fillMaxSize()) {
             // Left panel — product catalogue
             ProductCatalogSection(
-                modifier = Modifier.weight(0.6f),
-                onAddProduct = { product -> dialogProduct = product }
+                modifier         = Modifier.weight(0.6f),
+                products         = orderableProducts,
+                isLoading        = uiState is CatalogUiState.Loading,
+                errorMessage     = (uiState as? CatalogUiState.Error)?.message,
+                onRetry          = viewModel::loadProducts,
+                onAddProduct     = { product -> dialogProduct = product },
+                onCancel         = { showCancelDialog = true }
             )
 
             // Vertical divider
@@ -138,9 +215,9 @@ fun OrderBuilderScreen(
 
             // Right panel — cart
             CartPanel(
-                modifier = Modifier.weight(0.4f),
-                client = client,
-                cartItems = cartItems,
+                modifier   = Modifier.weight(0.4f),
+                client     = client,
+                cartItems  = cartItems,
                 onIncrement = { key -> incrementItem(key) },
                 onDecrement = { key -> decrementItem(key) },
                 onRemove    = { key -> removeItem(key) },
@@ -170,19 +247,32 @@ fun OrderBuilderScreen(
 
 // ── Product catalogue section (left panel) ────────────────────────────────────
 
-private val categories = listOf("Todos", "Galletas", "Bollería", "Dulces")
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProductCatalogSection(
     modifier: Modifier = Modifier,
-    onAddProduct: (OrderableProduct) -> Unit
+    products: List<OrderableProduct>,
+    isLoading: Boolean,
+    errorMessage: String?,
+    onRetry: () -> Unit,
+    onAddProduct: (OrderableProduct) -> Unit,
+    onCancel: () -> Unit = {}
 ) {
+    // Derive categories dynamically so filter chips always match real data.
+    val categories = remember(products) {
+        listOf("Todos") + products.map { it.category }.distinct().sorted()
+    }
+
     var query    by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf("Todos") }
 
-    val filtered = remember(query, selected) {
-        sampleOrderProducts.filter { product ->
+    // Reset filter when the category list changes (e.g. after a data reload).
+    LaunchedEffect(categories) {
+        if (selected !in categories) selected = "Todos"
+    }
+
+    val filtered = remember(query, selected, products) {
+        products.filter { product ->
             val matchesCategory = selected == "Todos" || product.category == selected
             val matchesQuery    = query.isBlank() ||
                 product.name.contains(query, ignoreCase = true) ||
@@ -198,12 +288,25 @@ private fun ProductCatalogSection(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // ── Header ────────────────────────────────────────────────────────────
-        Text(
-            text = "Catálogo de productos",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Catálogo de productos",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+            IconButton(onClick = onCancel) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Cancelar pedido",
+                    tint = Color(0xFFDC2626)
+                )
+            }
+        }
 
         // ── Search bar ────────────────────────────────────────────────────────
         OutlinedTextField(
@@ -244,19 +347,75 @@ private fun ProductCatalogSection(
             }
         }
 
-        // ── Product grid ──────────────────────────────────────────────────────
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 180.dp),
-            contentPadding = PaddingValues(vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement   = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            items(items = filtered, key = { it.id }) { product ->
-                ProductOrderCard(
-                    product  = product,
-                    onAdd    = { onAddProduct(product) }
-                )
+        // ── Content area: loading / error / grid ──────────────────────────────
+        when {
+            isLoading -> {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CircularProgressIndicator(color = BrandBlue)
+                        Text(
+                            text = "Cargando productos…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                }
+            }
+
+            errorMessage != null -> {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        modifier = Modifier.padding(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.ErrorOutline,
+                            contentDescription = null,
+                            tint = Color(0xFFDC2626),
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Text(
+                            text = errorMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center
+                        )
+                        OutlinedButton(onClick = onRetry) {
+                            Text(text = "Reintentar", color = BrandBlue)
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 180.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement   = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    items(items = filtered, key = { it.id }) { product ->
+                        ProductOrderCard(
+                            product = product,
+                            onAdd   = { onAddProduct(product) }
+                        )
+                    }
+                }
             }
         }
     }
@@ -264,7 +423,7 @@ private fun ProductCatalogSection(
 
 // ── Product order card ────────────────────────────────────────────────────────
 
-/** Per-category colour helpers (mirrors AddProductDialog helpers, kept local). */
+/** Per-category colour helpers. */
 private fun orderCardIconBg(category: String): Color = when (category) {
     "Galletas" -> Color(0xFFFEF3C7)
     "Bollería" -> Color(0xFFFEE2E2)
@@ -288,7 +447,7 @@ private fun orderCardIcon(category: String): ImageVector = when (category) {
 
 /**
  * Compact product card used inside the order-builder grid.
- * Shows the product icon, name, category, starting price and an "Añadir" button.
+ * Shows the product icon, name, category, price and an "Añadir" button.
  */
 @Composable
 private fun ProductOrderCard(
@@ -341,9 +500,9 @@ private fun ProductOrderCard(
                 )
             }
 
-            // Starting price
+            // Price
             Text(
-                text = "desde €%.2f".format(minPrice),
+                text = "€ %.2f".format(minPrice),
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
                 color = BrandBlue
