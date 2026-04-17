@@ -21,22 +21,27 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,127 +50,264 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.ExperimentalUnitApi
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
-import com.example.distridulce.model.CartItem
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.distridulce.model.OrderSession
 import com.example.distridulce.model.PaymentSummary
+import com.example.distridulce.network.dto.FacturaLineaResponseDto
+import com.example.distridulce.network.dto.FacturaResponseDto
 import com.example.distridulce.ui.theme.BackgroundLight
 import com.example.distridulce.ui.theme.BrandBlue
 import com.example.distridulce.ui.theme.TextPrimary
 import com.example.distridulce.ui.theme.TextSecondary
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 // ── Invoice screen ────────────────────────────────────────────────────────────
 
 /**
- * Final step of the order flow: displays the generated invoice/factura.
+ * Final step of the order flow: generates and displays the real invoice.
  *
- * Reads all data from [OrderSession] — no nav arguments needed.
- * [onNewOrder] should navigate back to NewOrderScreen and clear the session.
+ * [InvoiceViewModel] calls POST /api/facturas/desde-pedido/{pedidoId} on first
+ * open and caches the result in [OrderSession] to prevent duplicate creation
+ * on revisit.  [PaymentSummary] from the session drives the payment status UI
+ * (the backend does not yet receive the payment breakdown).
  */
 @Composable
-fun InvoiceScreen(onNewOrder: () -> Unit = {}) {
-    val session  = OrderSession
-    val summary  = session.paymentSummary ?: return
-    val dateStr  = remember {
-        SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("es", "ES")).format(Date())
-    }
+fun InvoiceScreen(
+    onBack: () -> Unit = {},
+    onNewOrder: () -> Unit = {},
+    viewModel: InvoiceViewModel = viewModel()
+) {
+    val uiState        by viewModel.uiState.collectAsState()
+    val paymentSummary  = OrderSession.paymentSummary
 
     Surface(modifier = Modifier.fillMaxSize(), color = BackgroundLight) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
-            contentAlignment = Alignment.TopCenter
-        ) {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = 720.dp)
-                    .padding(horizontal = 32.dp, vertical = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // ── Status header ─────────────────────────────────────────────
-                InvoiceStatusHeader(summary = summary)
+        // Back button overlay — always accessible regardless of load state
+        Box(modifier = Modifier.fillMaxSize()) {
+            when (val state = uiState) {
+                is InvoiceUiState.Loading -> InvoiceLoadingContent()
 
-                // ── Invoice card ──────────────────────────────────────────────
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape    = RoundedCornerShape(20.dp),
-                    colors   = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
-                ) {
-                    Column(modifier = Modifier.padding(28.dp)) {
+                is InvoiceUiState.Error -> InvoiceErrorContent(
+                    message = state.message,
+                    onRetry = viewModel::generateFactura,
+                    onBack  = onBack
+                )
 
-                        // Document header
-                        InvoiceDocumentHeader(ref = session.invoiceRef, date = dateStr)
-
-                        Spacer(Modifier.height(20.dp))
-                        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                        Spacer(Modifier.height(16.dp))
-
-                        // Client section
-                        session.client?.let { client ->
-                            InvoiceClientSection(clientName = client.name, address = client.address)
-                            Spacer(Modifier.height(20.dp))
-                            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                            Spacer(Modifier.height(16.dp))
-                        }
-
-                        // Products table
-                        InvoiceProductsTable(cartItems = session.cartItems)
-
-                        Spacer(Modifier.height(16.dp))
-                        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                        Spacer(Modifier.height(16.dp))
-
-                        // Payment summary
-                        InvoiceSummarySection(summary = summary)
+                is InvoiceUiState.Success -> InvoiceSuccessContent(
+                    factura        = state.factura,
+                    paymentSummary = paymentSummary,
+                    onBack         = onBack,
+                    onNewOrder     = {
+                        OrderSession.clear()
+                        onNewOrder()
                     }
-                }
-
-                // ── Action buttons ────────────────────────────────────────────
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick  = { /* TODO: share / print */ },
-                        modifier = Modifier.weight(1f),
-                        shape    = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Description,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("Compartir factura")
-                    }
-
-                    Button(
-                        onClick  = {
-                            OrderSession.clear()
-                            onNewOrder()
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape    = RoundedCornerShape(12.dp),
-                        colors   = ButtonDefaults.buttonColors(containerColor = BrandBlue)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("Nuevo pedido")
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
+                )
             }
+
+            // Floating back arrow — visible in all states (including Loading)
+            IconButton(
+                onClick  = onBack,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.ArrowBack,
+                    contentDescription = "Volver a Pedidos",
+                    tint               = TextSecondary
+                )
+            }
+        }
+    }
+}
+
+// ── Loading content ───────────────────────────────────────────────────────────
+
+@Composable
+private fun InvoiceLoadingContent() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            CircularProgressIndicator(color = BrandBlue, modifier = Modifier.size(48.dp))
+            Text(
+                text  = "Generando factura…",
+                style = MaterialTheme.typography.bodyLarge,
+                color = TextSecondary
+            )
+        }
+    }
+}
+
+// ── Error content ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun InvoiceErrorContent(message: String, onRetry: () -> Unit, onBack: () -> Unit = {}) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(40.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.ErrorOutline,
+                contentDescription = null,
+                tint = Color(0xFFDC2626),
+                modifier = Modifier.size(56.dp)
+            )
+            Text(
+                text  = "No se pudo generar la factura",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                text  = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary,
+                textAlign = TextAlign.Center
+            )
+            OutlinedButton(onClick = onRetry) {
+                Text(text = "Reintentar", color = BrandBlue)
+            }
+        }
+    }
+}
+
+// ── Success content ───────────────────────────────────────────────────────────
+
+@Composable
+private fun InvoiceSuccessContent(
+    factura: FacturaResponseDto,
+    paymentSummary: PaymentSummary?,
+    onBack: () -> Unit = {},
+    onNewOrder: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 720.dp)
+                .padding(horizontal = 32.dp, vertical = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // ── Status header ─────────────────────────────────────────────────
+            InvoiceStatusHeader(paymentSummary = paymentSummary)
+
+            // ── Invoice card ──────────────────────────────────────────────────
+            Card(
+                modifier  = Modifier.fillMaxWidth(),
+                shape     = RoundedCornerShape(20.dp),
+                colors    = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+            ) {
+                Column(modifier = Modifier.padding(28.dp)) {
+
+                    // Document header — real invoice number from backend
+                    InvoiceDocumentHeader(
+                        ref  = "FAC-%05d".format(factura.numeroFactura),
+                        date = formatFechaEmision(factura.fechaEmision)
+                    )
+
+                    Spacer(Modifier.height(20.dp))
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    Spacer(Modifier.height(16.dp))
+
+                    // Client section — from backend's client record
+                    InvoiceClientSection(
+                        clientName      = factura.nombreCliente,
+                        address         = factura.direccionCliente,
+                        documentoFiscal = factura.documentoFiscalCliente
+                    )
+
+                    Spacer(Modifier.height(20.dp))
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    Spacer(Modifier.height(16.dp))
+
+                    // Products table — backend invoice lines (includes IVA data)
+                    InvoiceProductsTable(lineas = factura.lineas)
+
+                    Spacer(Modifier.height(16.dp))
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    Spacer(Modifier.height(16.dp))
+
+                    // Totals + payment summary
+                    InvoiceSummarySection(
+                        paymentSummary = paymentSummary,
+                        baseImponible  = factura.baseImponible,
+                        impuestos      = factura.impuestos,
+                        totalFinal     = factura.total
+                    )
+                }
+            }
+
+            // ── Action buttons ────────────────────────────────────────────────
+            // Primary: back to orders list
+            Button(
+                onClick  = onBack,
+                modifier = Modifier.fillMaxWidth(),
+                shape    = RoundedCornerShape(12.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = BrandBlue)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.ArrowBack,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Volver a Pedidos")
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(
+                    onClick  = { /* TODO: share / print */ },
+                    modifier = Modifier.weight(1f),
+                    shape    = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Description,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("Compartir")
+                }
+
+                OutlinedButton(
+                    onClick  = onNewOrder,
+                    modifier = Modifier.weight(1f),
+                    shape    = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("Nuevo pedido")
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -173,8 +315,8 @@ fun InvoiceScreen(onNewOrder: () -> Unit = {}) {
 // ── Status header ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun InvoiceStatusHeader(summary: PaymentSummary) {
-    val (icon, iconBg, iconTint, label) = when (summary.paymentStatus) {
+private fun InvoiceStatusHeader(paymentSummary: PaymentSummary?) {
+    val (icon, iconBg, iconTint, label) = when (paymentSummary?.paymentStatus) {
         "Pagado Completo" -> StatusVisuals(
             Icons.Filled.CheckCircle,
             Color(0xFFD1FAE5), Color(0xFF059669),
@@ -203,7 +345,12 @@ private fun InvoiceStatusHeader(summary: PaymentSummary) {
                 .background(iconBg),
             contentAlignment = Alignment.Center
         ) {
-            Icon(imageVector = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(32.dp))
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(32.dp)
+            )
         }
         Text(
             text  = "Factura generada",
@@ -269,13 +416,17 @@ private fun InvoiceDocumentHeader(ref: String, date: String) {
 // ── Client section ────────────────────────────────────────────────────────────
 
 @Composable
-private fun InvoiceClientSection(clientName: String, address: String) {
+private fun InvoiceClientSection(
+    clientName: String,
+    address: String,
+    documentoFiscal: String? = null
+) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             text  = "FACTURAR A",
             style = MaterialTheme.typography.labelSmall,
             color = TextSecondary,
-            letterSpacing = androidx.compose.ui.unit.TextUnit(1.5f, androidx.compose.ui.unit.TextUnitType.Sp)
+            letterSpacing = TextUnit(1.5f, TextUnitType.Sp)
         )
         Text(
             text  = clientName,
@@ -288,13 +439,24 @@ private fun InvoiceClientSection(clientName: String, address: String) {
             style = MaterialTheme.typography.bodySmall,
             color = TextSecondary
         )
+        if (!documentoFiscal.isNullOrBlank()) {
+            Text(
+                text  = documentoFiscal,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
+        }
     }
 }
 
 // ── Products table ────────────────────────────────────────────────────────────
 
+/**
+ * Renders the invoice line table from the backend [FacturaLineaResponseDto] list.
+ * Columns: Producto | Cant. | Precio | Total
+ */
 @Composable
-private fun InvoiceProductsTable(cartItems: List<CartItem>) {
+private fun InvoiceProductsTable(lineas: List<FacturaLineaResponseDto>) {
     Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
         // Table header
         Row(
@@ -311,11 +473,11 @@ private fun InvoiceProductsTable(cartItems: List<CartItem>) {
                 modifier = Modifier.weight(1f)
             )
             Text(
-                text = "Ud.",
+                text = "Cant.",
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = TextSecondary,
-                modifier = Modifier.width(48.dp),
+                modifier = Modifier.width(52.dp),
                 textAlign = TextAlign.Center
             )
             Text(
@@ -337,7 +499,7 @@ private fun InvoiceProductsTable(cartItems: List<CartItem>) {
         }
 
         // Table rows
-        cartItems.forEachIndexed { index, item ->
+        lineas.forEachIndexed { index, linea ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -346,33 +508,42 @@ private fun InvoiceProductsTable(cartItems: List<CartItem>) {
             ) {
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        text  = item.productName,
+                        text  = linea.nombreArticulo,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         color = TextPrimary
                     )
+                    // Show article code if available (e.g. internal ref or barcode)
+                    if (!linea.codigoArticulo.isNullOrBlank()) {
+                        Text(
+                            text  = linea.codigoArticulo,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
+                    }
+                    // IVA rate as a subtle label
                     Text(
-                        text  = item.option.label,
+                        text  = "IVA ${linea.tipoIva.toInt()}%",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary
                     )
                 }
                 Text(
-                    text  = "${item.quantity}",
+                    text  = formatCantidad(linea.cantidad),
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextPrimary,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.width(48.dp)
+                    modifier = Modifier.width(52.dp)
                 )
                 Text(
-                    text  = "€%.2f".format(item.option.price),
+                    text  = "€%.2f".format(linea.precioUnitario),
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary,
                     textAlign = TextAlign.End,
                     modifier = Modifier.width(64.dp)
                 )
                 Text(
-                    text  = "€%.2f".format(item.lineTotal),
+                    text  = "€%.2f".format(linea.totalLinea),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = TextPrimary,
@@ -380,7 +551,7 @@ private fun InvoiceProductsTable(cartItems: List<CartItem>) {
                     modifier = Modifier.width(72.dp)
                 )
             }
-            if (index < cartItems.lastIndex) {
+            if (index < lineas.lastIndex) {
                 Divider(
                     modifier = Modifier.padding(horizontal = 12.dp),
                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
@@ -393,16 +564,23 @@ private fun InvoiceProductsTable(cartItems: List<CartItem>) {
 // ── Invoice summary section ───────────────────────────────────────────────────
 
 /**
- * The payment totals block at the bottom of the invoice.
- * Adapts to all three payment states (full / partial / pending).
+ * The fiscal totals + payment state block at the bottom of the invoice.
+ *
+ * @param paymentSummary   App-side payment selection; drives the abonado/pendiente rows
+ *                         and the status badge.  May be null if the session was cleared.
+ * @param baseImponible    Tax base from the backend.
+ * @param impuestos        Tax amount from the backend.
+ * @param totalFinal       Grand total from the backend (authoritative figure).
  */
 @Composable
 fun InvoiceSummarySection(
-    summary: PaymentSummary,
+    paymentSummary: PaymentSummary?,
+    baseImponible: Double,
+    impuestos: Double,
+    totalFinal: Double,
     modifier: Modifier = Modifier
 ) {
-    // Payment status badge colours
-    val (statusBg, statusFg) = when (summary.paymentStatus) {
+    val (statusBg, statusFg) = when (paymentSummary?.paymentStatus) {
         "Pagado Completo" -> Color(0xFFD1FAE5) to Color(0xFF059669)
         "Pago Parcial"    -> Color(0xFFDCEBFD) to BrandBlue
         else              -> Color(0xFFFEF3C7) to Color(0xFFD97706)
@@ -412,48 +590,49 @@ fun InvoiceSummarySection(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Subtotal
-        SummaryRow(label = "Subtotal", value = "€ %.2f".format(summary.totalAmount))
+        // Fiscal breakdown (from backend)
+        SummaryRow(label = "Base imponible", value = "€ %.2f".format(baseImponible))
+        SummaryRow(label = "IVA",            value = "€ %.2f".format(impuestos))
 
         Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
 
-        // Importe abonado
-        SummaryRow(
-            label     = "Importe abonado",
-            value     = "€ %.2f".format(summary.paidAmount),
-            valueColor = if (summary.paidAmount > 0) Color(0xFF059669) else TextSecondary
-        )
-
-        // Importe pendiente
-        SummaryRow(
-            label     = "Importe pendiente",
-            value     = "€ %.2f".format(summary.pendingAmount),
-            valueColor = if (summary.pendingAmount > 0) Color(0xFFD97706) else TextSecondary
-        )
-
-        // Estado de pago badge
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text  = "Estado de pago",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary
+        // Payment breakdown (from app-side PaymentSummary)
+        if (paymentSummary != null) {
+            SummaryRow(
+                label      = "Importe abonado",
+                value      = "€ %.2f".format(paymentSummary.paidAmount),
+                valueColor = if (paymentSummary.paidAmount > 0) Color(0xFF059669) else TextSecondary
             )
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(statusBg)
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            SummaryRow(
+                label      = "Importe pendiente",
+                value      = "€ %.2f".format(paymentSummary.pendingAmount),
+                valueColor = if (paymentSummary.pendingAmount > 0) Color(0xFFD97706) else TextSecondary
+            )
+
+            // Estado de pago badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text  = summary.paymentStatus,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = statusFg
+                    text  = "Estado de pago",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
                 )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(statusBg)
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text  = paymentSummary.paymentStatus,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = statusFg
+                    )
+                }
             }
         }
 
@@ -461,7 +640,7 @@ fun InvoiceSummarySection(
         Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
         Spacer(Modifier.height(4.dp))
 
-        // TOTAL — prominent
+        // TOTAL — prominent, authoritative figure from backend
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -474,7 +653,7 @@ fun InvoiceSummarySection(
                 color = TextPrimary
             )
             Text(
-                text  = "€ %.2f".format(summary.totalAmount),
+                text  = "€ %.2f".format(totalFinal),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = BrandBlue
@@ -483,7 +662,7 @@ fun InvoiceSummarySection(
     }
 }
 
-// ── Shared row ────────────────────────────────────────────────────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 @Composable
 private fun SummaryRow(
@@ -498,6 +677,44 @@ private fun SummaryRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(text = label, style = MaterialTheme.typography.bodySmall, color = labelColor)
-        Text(text = value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = valueColor)
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = valueColor
+        )
     }
 }
+
+/**
+ * Formats a [FacturaResponseDto.fechaEmision] string (ISO 8601 date or datetime)
+ * into a human-readable Spanish locale string.
+ */
+private fun formatFechaEmision(fechaEmision: String): String {
+    val formats = listOf(
+        "yyyy-MM-dd'T'HH:mm:ss" to "dd/MM/yyyy HH:mm",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS" to "dd/MM/yyyy HH:mm",
+        "yyyy-MM-dd" to "dd/MM/yyyy"
+    )
+    val locale = Locale("es", "ES")
+    for ((inputPattern, outputPattern) in formats) {
+        try {
+            val parsed = SimpleDateFormat(inputPattern, locale).parse(fechaEmision)
+            if (parsed != null) {
+                return SimpleDateFormat(outputPattern, locale).format(parsed)
+            }
+        } catch (_: Exception) { /* try next */ }
+    }
+    return fechaEmision  // fallback: return raw string unchanged
+}
+
+/**
+ * Formats a [Double] quantity as a clean integer string when the value is
+ * whole ("3.0" → "3"), or as two decimal places otherwise ("1.5" → "1.50").
+ */
+private fun formatCantidad(cantidad: Double): String =
+    if (cantidad == kotlin.math.floor(cantidad)) {
+        cantidad.toLong().toString()
+    } else {
+        "%.2f".format(cantidad)
+    }

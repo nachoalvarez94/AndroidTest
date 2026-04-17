@@ -44,13 +44,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -62,7 +66,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.distridulce.model.Client
 import com.example.distridulce.model.initials
-import com.example.distridulce.model.mockClients
 import com.example.distridulce.ui.theme.BackgroundLight
 import com.example.distridulce.ui.theme.BrandBlue
 import com.example.distridulce.ui.theme.TextPrimary
@@ -81,25 +84,36 @@ private val avatarPalette = listOf(
     Color(0xFF16A34A),
 )
 
-private fun avatarColor(index: Int): Color = avatarPalette[index % avatarPalette.size]
+/** Derives a stable avatar colour from the client's id — index-independent. */
+private fun avatarColor(clientId: String): Color =
+    avatarPalette[Math.abs(clientId.hashCode()) % avatarPalette.size]
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 /**
  * Client management screen.
  *
+ * Loads clients from the backend via [ClientsViewModel].
  * Shows a searchable grid of [ClientCard]s. Tapping a card opens a [ClientDetailDialog];
  * tapping *Nuevo Pedido* (card button or dialog button) calls [onNewOrder] with the
  * selected client, which the NavGraph wires directly to [OrderBuilderScreen].
  */
 @Composable
-fun ClientsScreen(onNewOrder: (Client) -> Unit = {}) {
+fun ClientsScreen(
+    onNewOrder: (Client) -> Unit = {},
+    viewModel: ClientsViewModel = viewModel()
+) {
+    val uiState      by viewModel.uiState.collectAsState()
     var query        by remember { mutableStateOf("") }
     var detailClient by remember { mutableStateOf<Client?>(null) }
 
-    val filtered = remember(query) {
-        if (query.isBlank()) mockClients
-        else mockClients.filter { it.name.contains(query, ignoreCase = true) }
+    // Clients list available only in Success state; empty otherwise.
+    val clients = (uiState as? ClientsUiState.Success)?.clients ?: emptyList()
+
+    // Local search filtering — always applied on the already-loaded list.
+    val filtered = remember(query, clients) {
+        if (query.isBlank()) clients
+        else clients.filter { it.name.contains(query, ignoreCase = true) }
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = BackgroundLight) {
@@ -110,30 +124,43 @@ fun ClientsScreen(onNewOrder: (Client) -> Unit = {}) {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // ── Header ────────────────────────────────────────────────────────
-            ClientsHeader(total = mockClients.size)
+            ClientsHeader(total = clients.size)
 
-            // ── Search bar ────────────────────────────────────────────────────
+            // ── Search bar (always visible) ───────────────────────────────────
             ClientSearchBar(query = query, onQueryChange = { query = it })
 
-            // ── Content ───────────────────────────────────────────────────────
-            if (filtered.isEmpty()) {
-                EmptyClientsState(query = query, modifier = Modifier.weight(1f))
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 300.dp),
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement   = Arrangement.spacedBy(16.dp)
-                ) {
-                    items(items = filtered, key = { it.id }) { client ->
-                        val index = mockClients.indexOf(client)
-                        ClientCard(
-                            client      = client,
-                            avatarColor = avatarColor(index),
-                            onClick     = { detailClient = client },
-                            onNewOrder  = { onNewOrder(client) }
-                        )
+            // ── Content — adapts to UI state ──────────────────────────────────
+            when (val state = uiState) {
+                is ClientsUiState.Loading -> {
+                    ClientsLoadingState(modifier = Modifier.weight(1f))
+                }
+                is ClientsUiState.Error -> {
+                    ClientsErrorState(
+                        message  = state.message,
+                        onRetry  = { viewModel.loadClients() },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                is ClientsUiState.Success -> {
+                    if (filtered.isEmpty()) {
+                        EmptyClientsState(query = query, modifier = Modifier.weight(1f))
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 300.dp),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalArrangement   = Arrangement.spacedBy(16.dp)
+                        ) {
+                            items(items = filtered, key = { it.id }) { client ->
+                                ClientCard(
+                                    client      = client,
+                                    avatarColor = avatarColor(client.id),
+                                    onClick     = { detailClient = client },
+                                    onNewOrder  = { onNewOrder(client) }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -142,10 +169,9 @@ fun ClientsScreen(onNewOrder: (Client) -> Unit = {}) {
 
     // ── Detail dialog ─────────────────────────────────────────────────────────
     detailClient?.let { client ->
-        val index = mockClients.indexOf(client)
         ClientDetailDialog(
             client      = client,
-            avatarColor = avatarColor(index),
+            avatarColor = avatarColor(client.id),
             onNewOrder  = {
                 detailClient = null
                 onNewOrder(client)
@@ -314,6 +340,63 @@ fun ClientCard(
                     text  = "Nuevo Pedido",
                     style = MaterialTheme.typography.labelMedium
                 )
+            }
+        }
+    }
+}
+
+// ── Loading state ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun ClientsLoadingState(modifier: Modifier = Modifier) {
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CircularProgressIndicator(color = BrandBlue, strokeWidth = 3.dp)
+            Text(
+                text  = "Cargando clientes…",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
+        }
+    }
+}
+
+// ── Error state ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun ClientsErrorState(
+    message: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.People,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp),
+                tint = TextSecondary.copy(alpha = 0.3f)
+            )
+            Text(
+                text  = "No se pudieron cargar los clientes",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = TextPrimary
+            )
+            Text(
+                text  = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
+            Spacer(Modifier.height(4.dp))
+            OutlinedButton(onClick = onRetry) {
+                Text("Reintentar")
             }
         }
     }

@@ -58,13 +58,49 @@ object OrderSession {
     var cartItems: List<CartItem> = emptyList()
     var paymentSummary: PaymentSummary? = null
 
-    /** Unique reference generated when the invoice is confirmed. */
+    /** Human-readable invoice reference shown on the invoice screen. */
     var invoiceRef: String = ""
+
+    /** Backend-assigned pedido primary key (available after a successful POST /api/pedidos). */
+    var pedidoId: Long? = null
+
+    /** Backend-assigned sequential order number. */
+    var pedidoNumero: Long? = null
+
+    /**
+     * Backend-assigned factura primary key (set after InvoiceViewModel successfully
+     * calls POST /api/facturas/desde-pedido/{pedidoId}).
+     * Used as a guard: if set, InvoiceViewModel uses GET instead of POST to avoid
+     * creating a duplicate invoice when the screen is revisited.
+     */
+    var facturaId: Long? = null
+
+    /** Backend-assigned sequential invoice number (e.g. 42 → shown as "FAC-00042"). */
+    var facturaNumero: Long? = null
+
+    /**
+     * Tracks whether each pedido was fully paid at submission time.
+     * Key = backend pedidoId; value = true only when [PaymentMethod.FULL] was selected.
+     *
+     * This is an in-memory cache so it only holds data for orders created in
+     * the current process lifetime.  Orders not present here default to `true`
+     * in [OrdersViewModel] (optimistic assumption for historical orders where
+     * the backend does not yet return a payment-status field).
+     *
+     * TODO: replace with a real backend field when the API exposes it.
+     */
+    val pagoCompleto: MutableMap<Long, Boolean> = mutableMapOf()
 
     fun clear() {
         client         = null
         cartItems      = emptyList()
         paymentSummary = null
         invoiceRef     = ""
+        pedidoId       = null
+        pedidoNumero   = null
+        facturaId      = null
+        facturaNumero  = null
+        // NOTE: pagoCompleto is intentionally NOT cleared here — it acts as a
+        // cross-session cache. Call pagoCompleto.clear() explicitly if needed.
     }
 }

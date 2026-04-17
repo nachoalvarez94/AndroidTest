@@ -26,18 +26,48 @@ data class OrderableProduct(
 /**
  * One line in the shopping cart.
  * [key] is stable and unique: used for increment / decrement / remove lookups.
+ *
+ * [articuloId] is the backend Long ID. It is populated when the item comes from
+ * a real backend product; null for items sourced from the current mock catalogue.
+ * The [PedidoMapper] uses it for the POST /api/pedidos request.
  */
 data class CartItem(
     val productId: String,
     val productName: String,
     val option: ProductOption,
-    val quantity: Int = 1
+    val quantity: Int = 1,
+    val articuloId: Long? = null
 ) {
     val key: String get() = "$productId::${option.id}"
     val lineTotal: Double get() = option.price * quantity
 }
 
-// ── Mock catalogue ────────────────────────────────────────────────────────────
+// ── Backend → OrderBuilder mapper ────────────────────────────────────────────
+
+/**
+ * Maps a real [CatalogProduct] loaded from the backend to the [OrderableProduct]
+ * model used by [OrderBuilderScreen].
+ *
+ * The backend exposes a single price per article, so a single "Por Unidades"
+ * [ProductOption] is created.  [CartItem.articuloId] is derived from [CatalogProduct.id],
+ * which is already the backend Long serialised as a string.
+ */
+fun CatalogProduct.toOrderableProduct(): OrderableProduct = OrderableProduct(
+    id       = id,
+    name     = name,
+    category = category,
+    options  = listOf(
+        ProductOption(
+            id          = "$id-U",
+            label       = "Por Unidades",
+            description = description.ifBlank { "1 ud." },
+            price       = price,
+            unit        = "ud."
+        )
+    )
+)
+
+// ── Mock catalogue (kept as offline fallback — not used in the main flow) ─────
 
 val sampleOrderProducts: List<OrderableProduct> = listOf(
     // ── Galletas ──────────────────────────────────────────────────────────────

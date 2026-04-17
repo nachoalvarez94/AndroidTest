@@ -20,23 +20,30 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cake
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Fastfood
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LocalGroceryStore
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,43 +54,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.distridulce.model.CatalogProduct
 import com.example.distridulce.model.findClientById
 import com.example.distridulce.ui.theme.BrandBlue
 import com.example.distridulce.ui.theme.IconBgBlue
 import com.example.distridulce.ui.theme.TextPrimary
 import com.example.distridulce.ui.theme.TextSecondary
-
-// ── Data model ────────────────────────────────────────────────────────────────
-
-private data class Product(
-    val id: Int,
-    val name: String,
-    val description: String,
-    val category: String,
-    val price: Double,
-    val stock: Int
-)
-
-private val sampleProducts = listOf(
-    // Galletas
-    Product(1,  "Galletas María",        "Clásicas de avena, paq. 12 uds",     "Galletas", 1.20, 340),
-    Product(2,  "Galletas Oreo",         "Rellenas de crema, paq. 6 uds",      "Galletas", 1.80, 215),
-    Product(3,  "Galletas Digestive",    "Cereales integrales, paq. 8 uds",    "Galletas", 2.10, 180),
-    Product(4,  "Galletas Mantequilla",  "Artesanas, paq. 10 uds",             "Galletas", 2.50,  95),
-    // Bollería
-    Product(5,  "Croissant Clásico",     "De mantequilla, paq. 4 uds",         "Bollería", 2.30, 120),
-    Product(6,  "Napolitana Chocolate",  "Con crema de cacao, ud.",             "Bollería", 1.10, 200),
-    Product(7,  "Donut Glaseado",        "Cobertura de azúcar, ud.",            "Bollería", 0.90, 310),
-    Product(8,  "Palmera Hojaldre",      "Grande con azúcar, ud.",              "Bollería", 1.50, 145),
-    // Dulces
-    Product(9,  "Turrón de Almendra",    "Tableta artesana, 300g",             "Dulces",   4.50,  75),
-    Product(10, "Bombones Surtidos",     "Caja selección, 24 uds",             "Dulces",   8.90,  60),
-    Product(11, "Caramelos Surtidos",    "Bolsa variada, 200g",                "Dulces",   1.20, 420),
-    Product(12, "Gominolas de Fresa",    "Blandas, bolsa 250g",                "Dulces",   1.80, 285),
-)
-
-private val filterCategories = listOf("Todos", "Galletas", "Bollería", "Dulces")
 
 // ── Category visual styles ────────────────────────────────────────────────────
 
@@ -131,21 +110,12 @@ private fun categoryIcon(category: String): ImageVector = when (category) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CatalogScreen(clientId: String? = null) {
+fun CatalogScreen(
+    clientId: String? = null,
+    viewModel: CatalogViewModel = viewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
     val client = remember(clientId) { findClientById(clientId) }
-
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf("Todos") }
-
-    val filteredProducts = remember(searchQuery, selectedCategory) {
-        sampleProducts.filter { product ->
-            val matchesSearch = product.name.contains(searchQuery, ignoreCase = true) ||
-                    product.description.contains(searchQuery, ignoreCase = true)
-            val matchesCategory = selectedCategory == "Todos" ||
-                    product.category == selectedCategory
-            matchesSearch && matchesCategory
-        }
-    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -163,29 +133,141 @@ fun CatalogScreen(clientId: String? = null) {
             if (client != null) {
                 ClientContextBanner(clientName = client.name)
             }
-            CatalogSearchBar(query = searchQuery, onQueryChange = { searchQuery = it })
-            CatalogFilterRow(
-                categories      = filterCategories,
-                selectedCategory = selectedCategory,
-                onCategorySelected = { selectedCategory = it }
-            )
-            ProductCountLabel(count = filteredProducts.size)
 
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 220.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(items = filteredProducts, key = { it.id }) { product ->
-                    ProductCard(
-                        name        = product.name,
-                        description = product.description,
-                        category    = product.category,
-                        price       = product.price,
-                        stock       = product.stock
+            when (val state = uiState) {
+                is CatalogUiState.Loading -> {
+                    CatalogLoadingState(modifier = Modifier.weight(1f))
+                }
+
+                is CatalogUiState.Error -> {
+                    CatalogErrorState(
+                        message = state.message,
+                        onRetry = viewModel::loadProducts,
+                        modifier = Modifier.weight(1f)
                     )
                 }
+
+                is CatalogUiState.Success -> {
+                    CatalogContent(
+                        products = state.products,
+                        client   = client
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── Loaded content ────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CatalogContent(
+    products: List<CatalogProduct>,
+    client: com.example.distridulce.model.Client?
+) {
+    // Derive categories dynamically from the loaded data
+    val categories = remember(products) {
+        listOf("Todos") + products.map { it.category }.distinct().sorted()
+    }
+
+    var searchQuery     by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("Todos") }
+
+    // If a data refresh changes the available categories, reset the filter
+    LaunchedEffect(categories) {
+        if (selectedCategory !in categories) selectedCategory = "Todos"
+    }
+
+    val filteredProducts = remember(searchQuery, selectedCategory, products) {
+        products.filter { product ->
+            val matchesSearch = product.name.contains(searchQuery, ignoreCase = true) ||
+                    product.description.contains(searchQuery, ignoreCase = true)
+            val matchesCategory = selectedCategory == "Todos" ||
+                    product.category == selectedCategory
+            matchesSearch && matchesCategory
+        }
+    }
+
+    CatalogSearchBar(query = searchQuery, onQueryChange = { searchQuery = it })
+    CatalogFilterRow(
+        categories       = categories,
+        selectedCategory = selectedCategory,
+        onCategorySelected = { selectedCategory = it }
+    )
+    ProductCountLabel(count = filteredProducts.size)
+
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 220.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        items(items = filteredProducts, key = { it.id }) { product ->
+            ProductCard(
+                name        = product.name,
+                description = product.description,
+                category    = product.category,
+                price       = product.price,
+                stock       = product.stock
+            )
+        }
+    }
+}
+
+// ── Loading state ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun CatalogLoadingState(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CircularProgressIndicator(color = BrandBlue)
+            Text(
+                text = "Cargando catálogo…",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary
+            )
+        }
+    }
+}
+
+// ── Error state ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun CatalogErrorState(
+    message: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.ErrorOutline,
+                contentDescription = null,
+                tint = Color(0xFFDC2626),
+                modifier = Modifier.size(48.dp)
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary,
+                textAlign = TextAlign.Center
+            )
+            OutlinedButton(onClick = onRetry) {
+                Text(text = "Reintentar", color = BrandBlue)
             }
         }
     }
@@ -367,7 +449,9 @@ private fun ProductCountLabel(count: Int) {
 
 /**
  * Reusable product card: icon area with category colour, name,
- * description, category badge, price and stock.
+ * description, category badge, price and — when known — stock.
+ *
+ * Stock is hidden when [stock] == [CatalogProduct.STOCK_UNKNOWN] (-1).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -446,11 +530,14 @@ fun ProductCard(
                         fontWeight = FontWeight.Bold,
                         color = BrandBlue
                     )
-                    Text(
-                        text = "Stock: $stock",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary
-                    )
+                    // Only show stock when the backend provides it
+                    if (stock >= 0) {
+                        Text(
+                            text = "Stock: $stock",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
+                    }
                 }
             }
         }

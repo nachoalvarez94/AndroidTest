@@ -1,6 +1,7 @@
 package com.example.distridulce.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
@@ -40,6 +41,12 @@ sealed class Screen(
         route = "new_order",
         title = "Nuevo Pedido",
         icon = Icons.Filled.ShoppingCartCheckout
+    )
+
+    object Orders : Screen(
+        route = "orders",
+        title = "Pedidos",
+        icon  = Icons.Filled.Assignment
     )
 
     object History : Screen(
@@ -82,6 +89,6 @@ sealed class Screen(
 
     companion object {
         /** Screens shown in the sidebar navigation. Flow-only screens are intentionally excluded. */
-        val all = listOf(Dashboard, Catalog, Clients, NewOrder, History)
+        val all = listOf(Dashboard, Catalog, Clients, NewOrder, Orders, History)
     }
 }
