@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.distridulce.navigation.Screen
+import com.example.distridulce.navigation.navigateTopLevel
 import com.example.distridulce.ui.theme.BrandBlue
 import com.example.distridulce.ui.theme.IconBgBlue
 import com.example.distridulce.ui.theme.TextSecondary
@@ -80,13 +81,7 @@ fun Sidebar(navController: NavController) {
                     )
                 },
                 selected = selected,
-                onClick = {
-                    navController.navigate(screen.route) {
-                        popUpTo(navController.graph.startDestinationId) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                },
+                onClick = { navController.navigateTopLevel(screen.route) },
                 colors = NavigationDrawerItemDefaults.colors(
                     selectedContainerColor = BrandBlue,
                     selectedIconColor      = Color.White,
