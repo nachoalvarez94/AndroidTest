@@ -102,7 +102,11 @@ sealed class Screen(
     }
 
     companion object {
-        /** Screens shown in the sidebar navigation. Flow-only screens are intentionally excluded. */
-        val all = listOf(Dashboard, Catalog, Clients, NewOrder, Orders, History)
+        /**
+         * Screens shown in the sidebar navigation.
+         * Flow-only screens (NewOrder, OrderBuilder, Checkout, Invoice, EditOrder)
+         * are intentionally excluded — the order-creation flow starts from Clients.
+         */
+        val all = listOf(Dashboard, Catalog, Clients, Orders, History)
     }
 }

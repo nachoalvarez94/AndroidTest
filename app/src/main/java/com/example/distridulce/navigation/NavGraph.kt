@@ -32,7 +32,15 @@ fun NavGraph(navController: NavHostController) {
         startDestination = Screen.Dashboard.route
     ) {
         composable(Screen.Dashboard.route) {
-            DashboardScreen()
+            DashboardScreen(
+                // Use navigateTopLevel for all quick-action navigations so they
+                // behave identically to sidebar taps — avoiding back-stack
+                // contamination that would cause Inicio to bounce back to the
+                // previously tapped section.
+                onNavigateToOrders  = { navController.navigateTopLevel(Screen.Orders.route) },
+                onNavigateToCatalog = { navController.navigateTopLevel(Screen.Catalog.route) },
+                onNavigateToClients = { navController.navigateTopLevel(Screen.Clients.route) }
+            )
         }
 
         // Standalone catalogue — sidebar navigation, no client context.
