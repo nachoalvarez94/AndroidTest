@@ -1,17 +1,37 @@
 package com.example.distridulce.ui.orders
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.distridulce.model.OrderSession
 import com.example.distridulce.network.dto.FacturaResponseDto
 import com.example.distridulce.repository.FacturaRepository
+import com.example.distridulce.repository.FacturaPdfRepository
 import com.example.distridulce.repository.PedidoRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
-// ── UI state ──────────────────────────────────────────────────────────────────
+// ── PDF action state ──────────────────────────────────────────────────────────
+
+/**
+ * Tracks the one-at-a-time PDF download triggered by "Compartir" or "Imprimir".
+ * Kept separate from [InvoiceUiState] so a PDF error never wipes the invoice data.
+ */
+sealed class PdfActionState {
+    /** No PDF action in progress. */
+    object Idle : PdfActionState()
+
+    /** Downloading the PDF from the backend (or reading from cache). */
+    object Downloading : PdfActionState()
+
+    /** Download failed — [message] is shown to the user. */
+    data class Error(val message: String) : PdfActionState()
+}
+
+// ── Invoice UI state ──────────────────────────────────────────────────────────
 
 sealed class InvoiceUiState {
     /** Invoice is being generated / fetched. */
@@ -50,6 +70,9 @@ class InvoiceViewModel : ViewModel() {
     private val _uiState = MutableStateFlow<InvoiceUiState>(InvoiceUiState.Loading)
     val uiState: StateFlow<InvoiceUiState> = _uiState.asStateFlow()
 
+    private val _pdfActionState = MutableStateFlow<PdfActionState>(PdfActionState.Idle)
+    val pdfActionState: StateFlow<PdfActionState> = _pdfActionState.asStateFlow()
+
     init {
         generateFactura()
     }
@@ -86,6 +109,46 @@ class InvoiceViewModel : ViewModel() {
                 }
                 _uiState.value = InvoiceUiState.Error(message)
             }
+        }
+    }
+
+    /**
+     * Ensures the PDF for the current invoice is available locally, then calls
+     * [onFile] with the resulting [File].
+     *
+     * Serves the file from cache when possible; downloads from the backend otherwise.
+     * [context] is only used inside the coroutine (never stored) so it is safe to
+     * pass an Activity or application context.
+     *
+     * @param onFile  Called on the main thread once the file is ready.
+     *                Typical usage: call [PdfShareHelper.share] or [PdfPrintHelper.print].
+     */
+    fun downloadAndAction(context: Context, onFile: (File) -> Unit) {
+        if (_pdfActionState.value is PdfActionState.Downloading) return
+
+        val facturaId = (_uiState.value as? InvoiceUiState.Success)?.factura?.id
+            ?: return  // invoice not loaded yet — button should be disabled in this state
+
+        viewModelScope.launch {
+            _pdfActionState.value = PdfActionState.Downloading
+            try {
+                val file = FacturaPdfRepository.getCachedPdf(context, facturaId)
+                    ?: FacturaPdfRepository.downloadPdf(context, facturaId)
+
+                _pdfActionState.value = PdfActionState.Idle
+                onFile(file)
+            } catch (e: Exception) {
+                _pdfActionState.value = PdfActionState.Error(
+                    e.message ?: "Error al obtener el PDF de la factura."
+                )
+            }
+        }
+    }
+
+    /** Clears a [PdfActionState.Error] so the button returns to its normal state. */
+    fun dismissPdfError() {
+        if (_pdfActionState.value is PdfActionState.Error) {
+            _pdfActionState.value = PdfActionState.Idle
         }
     }
 
