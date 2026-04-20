@@ -32,7 +32,11 @@ fun NavGraph(navController: NavHostController) {
         startDestination = Screen.Dashboard.route
     ) {
         composable(Screen.Dashboard.route) {
-            DashboardScreen()
+            DashboardScreen(
+                onNavigateToOrders  = { navController.navigate(Screen.Orders.route) },
+                onNavigateToCatalog = { navController.navigate(Screen.Catalog.route) },
+                onNavigateToClients = { navController.navigate(Screen.Clients.route) }
+            )
         }
 
         // Standalone catalogue — sidebar navigation, no client context.
