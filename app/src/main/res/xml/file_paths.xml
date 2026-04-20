@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider path declarations for DistriDulce.
+
+  <cache-path> maps to Context.getCacheDir() — the OS can evict these files
+  when storage is low, which is fine for downloaded PDFs (re-downloadable).
+
+  The 'name' attribute is the virtual path prefix exposed in the content:// URI.
+  The 'path' attribute is the subdirectory relative to cacheDir.
+-->
+<paths>
+    <cache-path
+        name="facturas_pdf"
+        path="facturas/" />
+</paths>

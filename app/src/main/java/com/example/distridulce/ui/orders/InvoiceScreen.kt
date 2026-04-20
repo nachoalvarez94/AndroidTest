@@ -23,9 +23,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -39,6 +40,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.ExperimentalUnitApi
@@ -61,6 +64,9 @@ import com.example.distridulce.ui.theme.BackgroundLight
 import com.example.distridulce.ui.theme.BrandBlue
 import com.example.distridulce.ui.theme.TextPrimary
 import com.example.distridulce.ui.theme.TextSecondary
+import com.example.distridulce.util.PdfPrintHelper
+import com.example.distridulce.util.PdfShareHelper
+import com.example.distridulce.util.PdfUriHelper
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -99,6 +105,7 @@ fun InvoiceScreen(
                     estadoCobro      = state.estadoCobro,
                     importeCobrado   = state.importeCobrado,
                     importePendiente = state.importePendiente,
+                    viewModel        = viewModel,
                     onBack           = onBack,
                     onNewOrder       = {
                         OrderSession.clear()
@@ -193,9 +200,15 @@ private fun InvoiceSuccessContent(
     estadoCobro: String?,
     importeCobrado: Double?,
     importePendiente: Double?,
+    viewModel: InvoiceViewModel,
     onBack: () -> Unit = {},
     onNewOrder: () -> Unit
 ) {
+    val context         = LocalContext.current
+    val pdfActionState  by viewModel.pdfActionState.collectAsState()
+    val isDownloading   = pdfActionState is PdfActionState.Downloading
+    val facturaRef      = "FAC-%05d".format(factura.numeroFactura)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -278,37 +291,108 @@ private fun InvoiceSuccessContent(
                 Text("Volver a Pedidos")
             }
 
+            // PDF error banner — shown when share/print download fails
+            if (pdfActionState is PdfActionState.Error) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFFFEE2E2))
+                        .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text     = (pdfActionState as PdfActionState.Error).message,
+                        style    = MaterialTheme.typography.bodySmall,
+                        color    = Color(0xFFDC2626),
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = viewModel::dismissPdfError) {
+                        Text("Cerrar", color = Color(0xFFDC2626))
+                    }
+                }
+            }
+
+            // Share + Print row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // Compartir PDF
                 OutlinedButton(
-                    onClick  = { /* TODO: share / print */ },
+                    onClick  = {
+                        viewModel.downloadAndAction(context) { file ->
+                            PdfShareHelper.share(
+                                context = context,
+                                uri     = PdfUriHelper.getUriForFile(context, file),
+                                title   = facturaRef
+                            )
+                        }
+                    },
+                    enabled  = !isDownloading,
                     modifier = Modifier.weight(1f),
                     shape    = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Description,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    if (isDownloading) {
+                        CircularProgressIndicator(
+                            modifier    = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color       = BrandBlue
+                        )
+                    } else {
+                        Icon(
+                            imageVector        = Icons.Filled.Share,
+                            contentDescription = null,
+                            modifier           = Modifier.size(16.dp)
+                        )
+                    }
                     Spacer(Modifier.width(6.dp))
                     Text("Compartir")
                 }
 
+                // Imprimir PDF
                 OutlinedButton(
-                    onClick  = onNewOrder,
+                    onClick  = {
+                        viewModel.downloadAndAction(context) { file ->
+                            PdfPrintHelper.print(context, file, facturaRef)
+                        }
+                    },
+                    enabled  = !isDownloading,
                     modifier = Modifier.weight(1f),
                     shape    = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    if (isDownloading) {
+                        CircularProgressIndicator(
+                            modifier    = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color       = BrandBlue
+                        )
+                    } else {
+                        Icon(
+                            imageVector        = Icons.Filled.Print,
+                            contentDescription = null,
+                            modifier           = Modifier.size(16.dp)
+                        )
+                    }
                     Spacer(Modifier.width(6.dp))
-                    Text("Nuevo pedido")
+                    Text("Imprimir")
                 }
+            }
+
+            // Nuevo pedido — secondary action
+            OutlinedButton(
+                onClick  = onNewOrder,
+                modifier = Modifier.fillMaxWidth(),
+                shape    = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.Add,
+                    contentDescription = null,
+                    modifier           = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Nuevo pedido")
             }
 
             Spacer(Modifier.height(16.dp))
