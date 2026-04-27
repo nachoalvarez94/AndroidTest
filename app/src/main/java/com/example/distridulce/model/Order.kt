@@ -35,7 +35,7 @@ data class CartItem(
     val productId: String,
     val productName: String,
     val option: ProductOption,
-    val quantity: Int = 1,
+    val quantity: Double = 1.0,
     val articuloId: Long? = null
 ) {
     val key: String get() = "$productId::${option.id}"
@@ -59,10 +59,15 @@ fun CatalogProduct.toOrderableProduct(): OrderableProduct = OrderableProduct(
     options  = listOf(
         ProductOption(
             id          = "$id-U",
-            label       = "Por Unidades",
-            description = description.ifBlank { "1 ud." },
+            label       = when (unidadVenta) {
+                "CAJA"   -> "Por Caja"
+                "GRANEL" -> "A Granel"
+                "PESO"   -> "Por Peso"
+                else     -> "Por Unidades"
+            },
+            description = description.ifBlank { "1 ${unitLabel()}" },
             price       = price,
-            unit        = "ud."
+            unit        = unitLabel()
         )
     )
 )

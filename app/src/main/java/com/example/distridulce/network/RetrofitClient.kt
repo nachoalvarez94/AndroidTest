@@ -38,6 +38,9 @@ object RetrofitClient {
      * Default: emulator loopback → Spring Boot on port 8080.
      */
     const val BASE_URL = "http://10.0.2.2:8080/"
+    //const val BASE_URL = "https://api.ignacio-alvarez.xyz/"
+   // const val BASE_URL = "http://192.168.1.100:8081/"
+
 
     // ── OkHttp ────────────────────────────────────────────────────────────────
 

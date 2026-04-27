@@ -7,7 +7,7 @@ package com.example.distridulce.model
  * Now shared between the screen, the mapper, and the ViewModel.
  *
  * Fields populated from the backend:
- *   id, name, description, price
+ *   id, name, description, price, unidadVenta, codigoInterno, codigoBarras
  *
  * Fields NOT yet available from the backend (marked with TODO):
  *   category — defaults to "General" until the API exposes a categoría field.
@@ -20,10 +20,43 @@ data class CatalogProduct(
     val description: String,
     val category: String,
     val price: Double,
-    val stock: Int = STOCK_UNKNOWN
+    val stock: Int = STOCK_UNKNOWN,
+    /** Backend enum value: UNIDAD · CAJA · GRANEL · PESO. Null if the backend omits it. */
+    val unidadVenta: String? = null,
+    /** Raw internal reference code — used for search matching. */
+    val codigoInterno: String? = null,
+    /** Raw EAN/barcode — used for search matching. */
+    val codigoBarras: String? = null
 ) {
     companion object {
         /** Sentinel value: stock data is not available from the backend. */
         const val STOCK_UNKNOWN = -1
     }
 }
+
+// ── Unit label helpers ────────────────────────────────────────────────────────
+
+/**
+ * Returns the short display label for a raw [unidadVenta] enum string.
+ *
+ * | Backend value | Display |
+ * |---------------|---------|
+ * | UNIDAD        | ud.     |
+ * | CAJA          | caja    |
+ * | GRANEL        | granel  |
+ * | PESO          | kg      |
+ * | null / other  | ud.     |
+ *
+ * Exposed as a standalone function so screens that receive individual fields
+ * (e.g. [ProductCard] in CatalogScreen) can call it without a full model.
+ */
+fun unitLabelFor(unidadVenta: String?): String = when (unidadVenta) {
+    "UNIDAD" -> "ud."
+    "CAJA"   -> "caja"
+    "GRANEL" -> "granel"
+    "PESO"   -> "kg"
+    else     -> "ud."
+}
+
+/** Convenience extension — delegates to [unitLabelFor]. */
+fun CatalogProduct.unitLabel(): String = unitLabelFor(unidadVenta)

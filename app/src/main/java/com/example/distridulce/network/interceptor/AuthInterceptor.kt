@@ -48,7 +48,15 @@ class AuthInterceptor : Interceptor {
         val response = chain.proceed(request)
 
         // ── Incoming response — handle 401 ────────────────────────────────────
-        if (response.code == 401) {
+        // Skip session clearing for the login endpoint itself:
+        //   • The backend returns 400 (not 401) for bad credentials, so a 401
+        //     here would be an edge case — but more importantly, calling
+        //     clearSession() during login would race with the ViewModel's own
+        //     error handling and could reset state the user hasn't seen yet.
+        //   • All other endpoints are protected; a 401 there means the token
+        //     has expired or been revoked → clear the session and go to login.
+        val isLoginRequest = originalRequest.url.encodedPath.endsWith("/api/auth/login")
+        if (response.code == 401 && !isLoginRequest) {
             // runBlocking is acceptable here: we are already on an OkHttp IO
             // thread (not a coroutine dispatcher), so there is no deadlock risk.
             // The DataStore write is a single small key removal — very fast.
