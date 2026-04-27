@@ -1,9 +1,11 @@
 package com.example.distridulce.network
 
 import com.example.distridulce.network.api.ArticulosApi
+import com.example.distridulce.network.api.AuthApi
 import com.example.distridulce.network.api.ClientesApi
 import com.example.distridulce.network.api.FacturasApi
 import com.example.distridulce.network.api.PedidosApi
+import com.example.distridulce.network.interceptor.AuthInterceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -22,6 +24,10 @@ import java.util.concurrent.TimeUnit
  *
  * Cleartext HTTP is allowed via `android:usesCleartextTraffic="true"` in the
  * manifest (development only — use HTTPS in production).
+ *
+ * ## Interceptor order
+ * 1. [AuthInterceptor] — adds `Authorization: Bearer` header; handles 401 responses.
+ * 2. [HttpLoggingInterceptor] — logs the full request *including* the auth header.
  */
 object RetrofitClient {
 
@@ -32,15 +38,21 @@ object RetrofitClient {
      * Default: emulator loopback → Spring Boot on port 8080.
      */
     const val BASE_URL = "http://10.0.2.2:8080/"
+    //const val BASE_URL = "https://api.ignacio-alvarez.xyz/"
+   // const val BASE_URL = "http://192.168.1.100:8081/"
+
 
     // ── OkHttp ────────────────────────────────────────────────────────────────
+
+    private val authInterceptor = AuthInterceptor()
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY
     }
 
     private val okHttpClient = OkHttpClient.Builder()
-        .addInterceptor(loggingInterceptor)
+        .addInterceptor(authInterceptor)    // 1st: injects/validates token
+        .addInterceptor(loggingInterceptor) // 2nd: logs full request + response
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
@@ -56,6 +68,7 @@ object RetrofitClient {
 
     // ── API instances ─────────────────────────────────────────────────────────
 
+    val authApi: AuthApi       = retrofit.create(AuthApi::class.java)
     val articulosApi: ArticulosApi = retrofit.create(ArticulosApi::class.java)
     val clientesApi: ClientesApi   = retrofit.create(ClientesApi::class.java)
     val facturasApi: FacturasApi   = retrofit.create(FacturasApi::class.java)

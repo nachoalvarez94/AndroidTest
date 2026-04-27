@@ -12,5 +12,7 @@ data class ArticuloDto(
     @SerializedName("precio")         val precio: Double,
     @SerializedName("codigoInterno")  val codigoInterno: String?,
     @SerializedName("codigoBarras")   val codigoBarras: String?,
-    @SerializedName("activo")         val activo: Boolean
+    @SerializedName("activo")         val activo: Boolean,
+    /** Possible values from the backend enum: UNIDAD · CAJA · GRANEL · PESO */
+    @SerializedName("unidadVenta")    val unidadVenta: String?
 )

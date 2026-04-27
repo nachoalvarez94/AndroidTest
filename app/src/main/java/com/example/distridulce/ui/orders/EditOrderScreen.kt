@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +23,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Fastfood
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LocalGroceryStore
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
@@ -60,6 +64,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import com.example.distridulce.model.unitLabelFor
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -155,19 +167,20 @@ fun EditOrderScreen(
 
             // ── Right panel — editable order (40 %) ───────────────────────────
             EditOrderPanel(
-                modifier      = Modifier.weight(0.4f),
-                loadState     = loadState,
-                saveState     = saveState,
-                editLines     = viewModel.editLines,
-                importeCobrado = viewModel.importeCobrado.collectAsState().value,
-                onIncrement   = viewModel::incrementLine,
-                onDecrement   = viewModel::decrementLine,
-                onRemove      = viewModel::removeLine,
+                modifier        = Modifier.weight(0.4f),
+                loadState       = loadState,
+                saveState       = saveState,
+                editLines       = viewModel.editLines,
+                importeCobrado  = viewModel.importeCobrado.collectAsState().value,
+                onIncrement     = viewModel::incrementLine,
+                onDecrement     = viewModel::decrementLine,
+                onSetCantidad   = viewModel::setLineCantidad,
+                onRemove        = viewModel::removeLine,
                 onImporteChange = viewModel::updateImporteCobrado,
-                onSave        = viewModel::save,
-                onDismissError = viewModel::dismissSaveError,
-                onBack        = onBack,
-                onRetry       = viewModel::loadPedido
+                onSave          = viewModel::save,
+                onDismissError  = viewModel::dismissSaveError,
+                onBack          = onBack,
+                onRetry         = viewModel::loadPedido
             )
         }
     }
@@ -193,19 +206,31 @@ private fun EditCatalogSection(
         listOf("Todos") + products.map { it.category }.distinct().sorted()
     }
 
-    var query    by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf("Todos") }
+    var query          by remember { mutableStateOf("") }
+    var selected       by remember { mutableStateOf("Todos") }
+    var showBarcodeTip by remember { mutableStateOf(false) }
+    val searchFocus    = remember { FocusRequester() }
 
     LaunchedEffect(categories) {
         if (selected !in categories) selected = "Todos"
+    }
+
+    // Auto-hide the barcode tip after 3 seconds
+    LaunchedEffect(showBarcodeTip) {
+        if (showBarcodeTip) {
+            delay(3_000)
+            showBarcodeTip = false
+        }
     }
 
     val filtered = remember(query, selected, products) {
         products.filter { p ->
             val matchCategory = selected == "Todos" || p.category == selected
             val matchQuery    = query.isBlank() ||
-                    p.name.contains(query, ignoreCase = true) ||
-                    p.category.contains(query, ignoreCase = true)
+                p.name.contains(query, ignoreCase = true) ||
+                p.description.contains(query, ignoreCase = true) ||
+                p.codigoInterno?.contains(query, ignoreCase = true) == true ||
+                p.codigoBarras?.contains(query, ignoreCase = true) == true
             matchCategory && matchQuery
         }
     }
@@ -224,23 +249,58 @@ private fun EditCatalogSection(
             color      = TextPrimary
         )
 
-        // Search bar
-        OutlinedTextField(
-            value         = query,
-            onValueChange = { query = it },
-            modifier      = Modifier.fillMaxWidth(),
-            placeholder   = { Text("Buscar producto…", color = TextSecondary) },
-            leadingIcon   = {
-                Icon(Icons.Filled.Search, contentDescription = null, tint = TextSecondary)
-            },
-            singleLine = true,
-            shape      = RoundedCornerShape(12.dp),
-            colors     = TextFieldDefaults.outlinedTextFieldColors(
-                containerColor       = Color.White,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                focusedBorderColor   = BrandBlue
+        // ── Search bar + barcode button ───────────────────────────────────────
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value         = query,
+                onValueChange = { query = it },
+                modifier      = Modifier
+                    .weight(1f)
+                    .focusRequester(searchFocus),
+                placeholder   = { Text("Buscar por nombre, ref. o código…", color = TextSecondary) },
+                leadingIcon   = {
+                    Icon(Icons.Filled.Search, contentDescription = null, tint = TextSecondary)
+                },
+                singleLine = true,
+                shape      = RoundedCornerShape(12.dp),
+                colors     = TextFieldDefaults.outlinedTextFieldColors(
+                    containerColor       = Color.White,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    focusedBorderColor   = BrandBlue
+                )
             )
-        )
+            IconButton(
+                onClick = {
+                    query = ""
+                    searchFocus.requestFocus()
+                    showBarcodeTip = true
+                }
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.QrCodeScanner,
+                    contentDescription = "Lector código de barras",
+                    tint               = BrandBlue
+                )
+            }
+        }
+
+        // Barcode reader tip
+        if (showBarcodeTip) {
+            Text(
+                text     = "Escanea el código con el lector Bluetooth",
+                style    = MaterialTheme.typography.labelSmall,
+                color    = BrandBlue,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(BrandBlue.copy(alpha = 0.08f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
 
         // Category chips
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -387,12 +447,22 @@ private fun EditCatalogProductCard(product: CatalogProduct, onAdd: () -> Unit) {
                 )
             }
 
-            Text(
-                text       = "€ %.2f".format(product.price),
-                style      = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.Bold,
-                color      = BrandBlue
-            )
+            Row(
+                verticalAlignment     = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(
+                    text       = "€ %.2f".format(product.price),
+                    style      = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color      = BrandBlue
+                )
+                Text(
+                    text  = "/ ${unitLabelFor(product.unidadVenta)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary
+                )
+            }
 
             Button(
                 onClick        = onAdd,
@@ -420,6 +490,7 @@ private fun EditOrderPanel(
     importeCobrado: String,
     onIncrement: (Long) -> Unit,
     onDecrement: (Long) -> Unit,
+    onSetCantidad: (Long, Double) -> Unit,
     onRemove: (Long) -> Unit,
     onImporteChange: (String) -> Unit,
     onSave: () -> Unit,
@@ -581,10 +652,11 @@ private fun EditOrderPanel(
                     } else {
                         items(items = editLines, key = { it.articuloId }) { line ->
                             EditLineRow(
-                                line        = line,
-                                onIncrement = { onIncrement(line.articuloId) },
-                                onDecrement = { onDecrement(line.articuloId) },
-                                onRemove    = { onRemove(line.articuloId) }
+                                line          = line,
+                                onIncrement   = { onIncrement(line.articuloId) },
+                                onDecrement   = { onDecrement(line.articuloId) },
+                                onSetCantidad = { qty -> onSetCantidad(line.articuloId, qty) },
+                                onRemove      = { onRemove(line.articuloId) }
                             )
                             Divider(
                                 color    = ColorDivider,
@@ -671,12 +743,30 @@ private fun EditLineRow(
     line: EditLine,
     onIncrement: () -> Unit,
     onDecrement: () -> Unit,
+    onSetCantidad: (Double) -> Unit,
     onRemove: () -> Unit
 ) {
-    val cantidadLabel = if (line.cantidad == kotlin.math.floor(line.cantidad))
-        line.cantidad.toLong().toString()
-    else
-        "%.1f".format(line.cantidad)
+    // rawText tracks the TextField content; re-synced from line.cantidad when
+    // not focused (e.g. after +/- buttons update the parent).
+    var rawText  by remember { mutableStateOf(formatQty(line.cantidad)) }
+    var isFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(line.cantidad) {
+        if (!isFocused) rawText = formatQty(line.cantidad)
+    }
+
+    val focusManager = LocalFocusManager.current
+
+    fun commitText() {
+        val parsed = rawText.replace(",", ".").toDoubleOrNull()
+        isFocused = false
+        if (parsed == null || parsed.isNaN() || parsed.isInfinite()) {
+            rawText = formatQty(line.cantidad)  // restore invalid input
+        } else {
+            onSetCantidad(parsed)
+            rawText = formatQty(parsed)          // normalize display
+        }
+    }
 
     Row(
         modifier          = Modifier
@@ -703,7 +793,7 @@ private fun EditLineRow(
 
         Spacer(Modifier.width(8.dp))
 
-        // Qty controls: [-] [N] [+]
+        // Qty controls: [-] [editable field] [+]
         Row(
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -720,20 +810,42 @@ private fun EditLineRow(
                 )
             }
 
-            Box(
-                modifier         = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(ColorPrimaryLight)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text       = cantidadLabel,
+            // Editable quantity field — styled to match the original Box look.
+            BasicTextField(
+                value         = rawText,
+                onValueChange = { new ->
+                    if (new.isEmpty() || new == "-" ||
+                        new.matches(Regex("-?[0-9]*[.,]?[0-9]*"))) {
+                        rawText = new
+                    }
+                },
+                singleLine    = true,
+                textStyle     = TextStyle(
                     fontSize   = 13.sp,
                     fontWeight = FontWeight.Bold,
+                    textAlign  = TextAlign.Center,
                     color      = ColorPrimary
-                )
-            }
+                ),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Decimal,
+                    imeAction    = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = { focusManager.clearFocus() }
+                ),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(ColorPrimaryLight)
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .defaultMinSize(minWidth = 40.dp)
+                    .onFocusChanged { state ->
+                        if (state.isFocused) {
+                            isFocused = true
+                        } else if (isFocused) {
+                            commitText()
+                        }
+                    }
+            )
 
             IconButton(
                 onClick  = onIncrement,

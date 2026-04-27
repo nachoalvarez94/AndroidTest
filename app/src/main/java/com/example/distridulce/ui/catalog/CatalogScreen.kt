@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.distridulce.model.CatalogProduct
 import com.example.distridulce.model.findClientById
+import com.example.distridulce.model.unitLabelFor
 import com.example.distridulce.ui.theme.BrandBlue
 import com.example.distridulce.ui.theme.IconBgBlue
 import com.example.distridulce.ui.theme.TextPrimary
@@ -181,10 +182,13 @@ private fun CatalogContent(
 
     val filteredProducts = remember(searchQuery, selectedCategory, products) {
         products.filter { product ->
-            val matchesSearch = product.name.contains(searchQuery, ignoreCase = true) ||
-                    product.description.contains(searchQuery, ignoreCase = true)
+            val matchesSearch = searchQuery.isBlank() ||
+                product.name.contains(searchQuery, ignoreCase = true) ||
+                product.description.contains(searchQuery, ignoreCase = true) ||
+                product.codigoInterno?.contains(searchQuery, ignoreCase = true) == true ||
+                product.codigoBarras?.contains(searchQuery, ignoreCase = true) == true
             val matchesCategory = selectedCategory == "Todos" ||
-                    product.category == selectedCategory
+                product.category == selectedCategory
             matchesSearch && matchesCategory
         }
     }
@@ -209,7 +213,8 @@ private fun CatalogContent(
                 description = product.description,
                 category    = product.category,
                 price       = product.price,
-                stock       = product.stock
+                stock       = product.stock,
+                unidadVenta = product.unidadVenta
             )
         }
     }
@@ -461,6 +466,7 @@ fun ProductCard(
     category: String,
     price: Double,
     stock: Int,
+    unidadVenta: String? = null,
     modifier: Modifier = Modifier
 ) {
     val iconBg   = categoryIconBg(category)
@@ -524,12 +530,23 @@ fun ProductCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "€ %.2f".format(price),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = BrandBlue
-                    )
+                    // Price + unit label
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = "€ %.2f".format(price),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = BrandBlue
+                        )
+                        Text(
+                            text = "/ ${unitLabelFor(unidadVenta)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
+                    }
                     // Only show stock when the backend provides it
                     if (stock >= 0) {
                         Text(

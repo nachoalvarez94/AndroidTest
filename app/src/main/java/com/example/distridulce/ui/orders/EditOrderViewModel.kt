@@ -136,12 +136,16 @@ class EditOrderViewModel(private val pedidoId: Long) : ViewModel() {
 
     fun decrementLine(articuloId: Long) {
         val idx = editLines.indexOfFirst { it.articuloId == articuloId }
-        if (idx < 0) return
-        val line = editLines[idx]
-        if (line.cantidad > 1.0) {
-            editLines[idx] = line.copy(cantidad = line.cantidad - 1.0)
-        } else {
-            editLines.removeAt(idx)
+        if (idx >= 0) {
+            editLines[idx] = editLines[idx].copy(cantidad = editLines[idx].cantidad - 1.0)
+        }
+    }
+
+    /** Sets the quantity of a line directly (from manual TextField input). */
+    fun setLineCantidad(articuloId: Long, cantidad: Double) {
+        val idx = editLines.indexOfFirst { it.articuloId == articuloId }
+        if (idx >= 0) {
+            editLines[idx] = editLines[idx].copy(cantidad = cantidad)
         }
     }
 
