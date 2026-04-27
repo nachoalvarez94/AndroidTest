@@ -308,9 +308,6 @@ fun ClientCard(
                         )
                     }
                 }
-
-                // Orders badge
-                OrdersBadge(count = client.totalOrders)
             }
 
             Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))

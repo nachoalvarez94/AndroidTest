@@ -326,7 +326,7 @@ private fun ReviewItemRow(item: CartItem) {
                 color = TextPrimary
             )
             Text(
-                text = "${item.option.label} · ×${item.quantity}",
+                text = "${item.option.label} · ×${formatQty(item.quantity)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary
             )

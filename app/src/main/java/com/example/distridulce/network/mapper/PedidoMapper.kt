@@ -36,7 +36,7 @@ fun List<CartItem>.toPedidoRequest(
             ?: return@mapNotNull null   // skip unmappable items
         PedidoLineaRequestDto(
             articuloId = articuloId,
-            cantidad   = item.quantity.toDouble()
+            cantidad   = item.quantity
         )
     }
 

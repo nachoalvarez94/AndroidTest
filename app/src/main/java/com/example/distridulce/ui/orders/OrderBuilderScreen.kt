@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Fastfood
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LocalGroceryStore
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -54,6 +55,9 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,11 +69,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.distridulce.model.CartItem
+import com.example.distridulce.model.CatalogProduct
 import com.example.distridulce.model.OrderSession
 import com.example.distridulce.model.OrderableProduct
 import com.example.distridulce.model.ProductOption
 import com.example.distridulce.model.findClientById
 import com.example.distridulce.model.toOrderableProduct
+import com.example.distridulce.model.unitLabel
 import com.example.distridulce.ui.catalog.CatalogUiState
 import com.example.distridulce.ui.catalog.CatalogViewModel
 import com.example.distridulce.ui.theme.BackgroundLight
@@ -105,12 +111,11 @@ fun OrderBuilderScreen(
         OrderSession.client?.takeIf { it.id == clientId } ?: findClientById(clientId)
     }
 
-    // Map backend products to the OrderableProduct shape expected by this screen.
-    val orderableProducts = remember(uiState) {
-        (uiState as? CatalogUiState.Success)
-            ?.products
-            ?.map { it.toOrderableProduct() }
-            ?: emptyList()
+    // Products loaded from the backend — kept as CatalogProduct so the left
+    // panel can search by codigoInterno / codigoBarras and show unidadVenta.
+    // Conversion to OrderableProduct only happens when the user taps "Añadir".
+    val catalogProducts = remember(uiState) {
+        (uiState as? CatalogUiState.Success)?.products ?: emptyList()
     }
 
     // ── Cancel confirmation dialog ────────────────────────────────────────────
@@ -146,14 +151,14 @@ fun OrderBuilderScreen(
 
     // ── Cart state ────────────────────────────────────────────────────────────
     val cartItems = remember { mutableStateListOf<CartItem>() }
-    var dialogProduct by remember { mutableStateOf<OrderableProduct?>(null) }
+    var dialogProduct by remember { mutableStateOf<CatalogProduct?>(null) }
 
     // ── Cart operations ───────────────────────────────────────────────────────
     fun addOrIncrement(product: OrderableProduct, option: ProductOption) {
         val key = "${product.id}::${option.id}"
         val idx = cartItems.indexOfFirst { it.key == key }
         if (idx >= 0) {
-            cartItems[idx] = cartItems[idx].copy(quantity = cartItems[idx].quantity + 1)
+            cartItems[idx] = cartItems[idx].copy(quantity = cartItems[idx].quantity + 1.0)
         } else {
             cartItems.add(
                 CartItem(
@@ -169,19 +174,17 @@ fun OrderBuilderScreen(
 
     fun incrementItem(key: String) {
         val idx = cartItems.indexOfFirst { it.key == key }
-        if (idx >= 0) cartItems[idx] = cartItems[idx].copy(quantity = cartItems[idx].quantity + 1)
+        if (idx >= 0) cartItems[idx] = cartItems[idx].copy(quantity = cartItems[idx].quantity + 1.0)
     }
 
     fun decrementItem(key: String) {
         val idx = cartItems.indexOfFirst { it.key == key }
-        if (idx >= 0) {
-            val current = cartItems[idx]
-            if (current.quantity > 1) {
-                cartItems[idx] = current.copy(quantity = current.quantity - 1)
-            } else {
-                cartItems.removeAt(idx)
-            }
-        }
+        if (idx >= 0) cartItems[idx] = cartItems[idx].copy(quantity = cartItems[idx].quantity - 1.0)
+    }
+
+    fun setQuantity(key: String, qty: Double) {
+        val idx = cartItems.indexOfFirst { it.key == key }
+        if (idx >= 0) cartItems[idx] = cartItems[idx].copy(quantity = qty)
     }
 
     fun removeItem(key: String) {
@@ -197,7 +200,7 @@ fun OrderBuilderScreen(
             // Left panel — product catalogue
             ProductCatalogSection(
                 modifier         = Modifier.weight(0.6f),
-                products         = orderableProducts,
+                products         = catalogProducts,
                 isLoading        = uiState is CatalogUiState.Loading,
                 errorMessage     = (uiState as? CatalogUiState.Error)?.message,
                 onRetry          = viewModel::loadProducts,
@@ -215,12 +218,13 @@ fun OrderBuilderScreen(
 
             // Right panel — cart
             CartPanel(
-                modifier   = Modifier.weight(0.4f),
-                client     = client,
-                cartItems  = cartItems,
-                onIncrement = { key -> incrementItem(key) },
-                onDecrement = { key -> decrementItem(key) },
-                onRemove    = { key -> removeItem(key) },
+                modifier      = Modifier.weight(0.4f),
+                client        = client,
+                cartItems     = cartItems,
+                onIncrement   = { key -> incrementItem(key) },
+                onDecrement   = { key -> decrementItem(key) },
+                onSetQuantity = { key, qty -> setQuantity(key, qty) },
+                onRemove      = { key -> removeItem(key) },
                 onConfirm   = {
                     // Snapshot the order into the session before navigating to checkout.
                     OrderSession.clear()
@@ -233,11 +237,13 @@ fun OrderBuilderScreen(
     }
 
     // ── Add-product dialog ────────────────────────────────────────────────────
-    dialogProduct?.let { product ->
+    // Convert CatalogProduct → OrderableProduct only here, on demand.
+    dialogProduct?.let { catalogProduct ->
+        val orderable = catalogProduct.toOrderableProduct()
         AddProductDialog(
-            product = product,
+            product = orderable,
             onOptionSelected = { option ->
-                addOrIncrement(product, option)
+                addOrIncrement(orderable, option)
                 dialogProduct = null
             },
             onDismiss = { dialogProduct = null }
@@ -251,24 +257,32 @@ fun OrderBuilderScreen(
 @Composable
 private fun ProductCatalogSection(
     modifier: Modifier = Modifier,
-    products: List<OrderableProduct>,
+    products: List<CatalogProduct>,
     isLoading: Boolean,
     errorMessage: String?,
     onRetry: () -> Unit,
-    onAddProduct: (OrderableProduct) -> Unit,
+    onAddProduct: (CatalogProduct) -> Unit,
     onCancel: () -> Unit = {}
 ) {
-    // Derive categories dynamically so filter chips always match real data.
     val categories = remember(products) {
         listOf("Todos") + products.map { it.category }.distinct().sorted()
     }
 
-    var query    by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf("Todos") }
+    var query           by remember { mutableStateOf("") }
+    var selected        by remember { mutableStateOf("Todos") }
+    var showBarcodeTip  by remember { mutableStateOf(false) }
+    val searchFocus     = remember { FocusRequester() }
 
-    // Reset filter when the category list changes (e.g. after a data reload).
     LaunchedEffect(categories) {
         if (selected !in categories) selected = "Todos"
+    }
+
+    // Auto-hide the barcode tip after 3 seconds
+    LaunchedEffect(showBarcodeTip) {
+        if (showBarcodeTip) {
+            delay(3_000)
+            showBarcodeTip = false
+        }
     }
 
     val filtered = remember(query, selected, products) {
@@ -276,7 +290,9 @@ private fun ProductCatalogSection(
             val matchesCategory = selected == "Todos" || product.category == selected
             val matchesQuery    = query.isBlank() ||
                 product.name.contains(query, ignoreCase = true) ||
-                product.category.contains(query, ignoreCase = true)
+                product.description.contains(query, ignoreCase = true) ||
+                product.codigoInterno?.contains(query, ignoreCase = true) == true ||
+                product.codigoBarras?.contains(query, ignoreCase = true) == true
             matchesCategory && matchesQuery
         }
     }
@@ -308,29 +324,60 @@ private fun ProductCatalogSection(
             }
         }
 
-        // ── Search bar ────────────────────────────────────────────────────────
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
+        // ── Search bar + barcode button ───────────────────────────────────────
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            placeholder = {
-                Text("Buscar producto…", color = TextSecondary)
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Filled.Search,
-                    contentDescription = null,
-                    tint = TextSecondary
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value         = query,
+                onValueChange = { query = it },
+                modifier      = Modifier
+                    .weight(1f)
+                    .focusRequester(searchFocus),
+                placeholder   = { Text("Buscar por nombre, ref. o código…", color = TextSecondary) },
+                leadingIcon   = {
+                    Icon(Icons.Filled.Search, contentDescription = null, tint = TextSecondary)
+                },
+                singleLine = true,
+                shape      = RoundedCornerShape(12.dp),
+                colors     = TextFieldDefaults.outlinedTextFieldColors(
+                    containerColor       = Color.White,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    focusedBorderColor   = BrandBlue
                 )
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            colors = TextFieldDefaults.outlinedTextFieldColors(
-                containerColor = Color.White,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                focusedBorderColor = BrandBlue
             )
-        )
+            // Bluetooth barcode reader button — focuses the search field so the
+            // scanner (acting as keyboard) writes the barcode directly into it.
+            IconButton(
+                onClick = {
+                    query = ""
+                    searchFocus.requestFocus()
+                    showBarcodeTip = true
+                }
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.QrCodeScanner,
+                    contentDescription = "Lector código de barras",
+                    tint               = BrandBlue
+                )
+            }
+        }
+
+        // Barcode reader tip — shown for 3 s after tapping the scanner button
+        if (showBarcodeTip) {
+            Text(
+                text     = "Escanea el código con el lector Bluetooth",
+                style    = MaterialTheme.typography.labelSmall,
+                color    = BrandBlue,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(BrandBlue.copy(alpha = 0.08f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
 
         // ── Category filter chips ─────────────────────────────────────────────
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -351,9 +398,7 @@ private fun ProductCatalogSection(
         when {
             isLoading -> {
                 Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -362,7 +407,7 @@ private fun ProductCatalogSection(
                     ) {
                         CircularProgressIndicator(color = BrandBlue)
                         Text(
-                            text = "Cargando productos…",
+                            text  = "Cargando productos…",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
@@ -372,9 +417,7 @@ private fun ProductCatalogSection(
 
             errorMessage != null -> {
                 Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -385,13 +428,13 @@ private fun ProductCatalogSection(
                         Icon(
                             imageVector = Icons.Filled.ErrorOutline,
                             contentDescription = null,
-                            tint = Color(0xFFDC2626),
+                            tint     = Color(0xFFDC2626),
                             modifier = Modifier.size(40.dp)
                         )
                         Text(
-                            text = errorMessage,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
+                            text      = errorMessage,
+                            style     = MaterialTheme.typography.bodySmall,
+                            color     = TextSecondary,
                             textAlign = TextAlign.Center
                         )
                         OutlinedButton(onClick = onRetry) {
@@ -403,11 +446,11 @@ private fun ProductCatalogSection(
 
             else -> {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 180.dp),
-                    contentPadding = PaddingValues(vertical = 4.dp),
+                    columns               = GridCells.Adaptive(minSize = 180.dp),
+                    contentPadding        = PaddingValues(vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement   = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.weight(1f)
+                    modifier              = Modifier.weight(1f)
                 ) {
                     items(items = filtered, key = { it.id }) { product ->
                         ProductOrderCard(
@@ -447,28 +490,26 @@ private fun orderCardIcon(category: String): ImageVector = when (category) {
 
 /**
  * Compact product card used inside the order-builder grid.
- * Shows the product icon, name, category, price and an "Añadir" button.
+ * Receives a [CatalogProduct] directly — no prior mapping needed.
  */
 @Composable
 private fun ProductOrderCard(
-    product: OrderableProduct,
+    product: CatalogProduct,
     onAdd: () -> Unit
 ) {
-    val minPrice = product.options.minOf { it.price }
-
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
+            modifier            = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Icon area
+            // ── Icon area ─────────────────────────────────────────────────────
             Box(
-                modifier = Modifier
+                modifier         = Modifier
                     .fillMaxWidth()
                     .height(70.dp)
                     .clip(RoundedCornerShape(12.dp))
@@ -476,48 +517,58 @@ private fun ProductOrderCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = orderCardIcon(product.category),
+                    imageVector        = orderCardIcon(product.category),
                     contentDescription = null,
-                    tint = orderCardIconTint(product.category),
-                    modifier = Modifier.size(32.dp)
+                    tint               = orderCardIconTint(product.category),
+                    modifier           = Modifier.size(32.dp)
                 )
             }
 
-            // Name + category
+            // ── Name + category ───────────────────────────────────────────────
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = product.name,
-                    style = MaterialTheme.typography.bodyMedium,
+                    text       = product.name,
+                    style      = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = TextPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    color      = TextPrimary,
+                    maxLines   = 2,
+                    overflow   = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = product.category,
+                    text  = product.category,
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary
                 )
             }
 
-            // Price
-            Text(
-                text = "€ %.2f".format(minPrice),
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.Bold,
-                color = BrandBlue
-            )
-
-            // Add button
-            Button(
-                onClick = onAdd,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-                contentPadding = PaddingValues(vertical = 8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = BrandBlue)
+            // ── Price + unit ──────────────────────────────────────────────────
+            Row(
+                verticalAlignment     = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 Text(
-                    text = "Añadir",
+                    text       = "€ %.2f".format(product.price),
+                    style      = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color      = BrandBlue
+                )
+                Text(
+                    text  = "/ ${product.unitLabel()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary
+                )
+            }
+
+            // ── Add button ────────────────────────────────────────────────────
+            Button(
+                onClick        = onAdd,
+                modifier       = Modifier.fillMaxWidth(),
+                shape          = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(vertical = 8.dp),
+                colors         = ButtonDefaults.buttonColors(containerColor = BrandBlue)
+            ) {
+                Text(
+                    text  = "Añadir",
                     style = MaterialTheme.typography.labelMedium,
                     color = Color.White
                 )

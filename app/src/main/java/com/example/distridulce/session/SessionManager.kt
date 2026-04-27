@@ -45,7 +45,9 @@ private val Context.dataStore: DataStore<Preferences>
  */
 object SessionManager {
 
-    private val TOKEN_KEY = stringPreferencesKey("jwt_token")
+    private val TOKEN_KEY        = stringPreferencesKey("jwt_token")
+    private val USERNAME_KEY     = stringPreferencesKey("username")
+    private val DISPLAY_NAME_KEY = stringPreferencesKey("display_name")
 
     // Set once in init() before any IO starts.
     private lateinit var appContext: Context
@@ -58,6 +60,23 @@ object SessionManager {
      */
     @Volatile
     var token: String? = null
+        private set
+
+    /**
+     * Login name returned by the backend (e.g. "jperez" or "jperez@empresa.com").
+     * `null` if not provided by the backend or before the first load.
+     */
+    @Volatile
+    var username: String? = null
+        private set
+
+    /**
+     * Human-readable display name (e.g. "Juan Pérez").
+     * Falls back to [username] at call-site if the backend omits it.
+     * `null` if not provided by the backend or before the first load.
+     */
+    @Volatile
+    var displayName: String? = null
         private set
 
     private val _isLoggedIn = MutableStateFlow<Boolean?>(null)
@@ -87,9 +106,11 @@ object SessionManager {
      * Until this completes, [isLoggedIn] remains `null`.
      */
     suspend fun loadToken() {
-        val prefs      = appContext.dataStore.data.first()
-        val savedToken = prefs[TOKEN_KEY]
-        token          = savedToken
+        val prefs         = appContext.dataStore.data.first()
+        val savedToken    = prefs[TOKEN_KEY]
+        token             = savedToken
+        username          = prefs[USERNAME_KEY]
+        displayName       = prefs[DISPLAY_NAME_KEY]
         _isLoggedIn.value = savedToken != null
     }
 
@@ -109,6 +130,23 @@ object SessionManager {
     }
 
     /**
+     * Persists optional user info returned by the login response.
+     *
+     * Called by [AuthRepository] right after [saveToken].  Either argument can
+     * be `null` if the backend does not include that field — in that case the
+     * corresponding DataStore entry is removed (not left stale from a previous
+     * session).
+     */
+    suspend fun saveUserInfo(newUsername: String?, newDisplayName: String?) {
+        username    = newUsername
+        displayName = newDisplayName
+        appContext.dataStore.edit { prefs ->
+            if (newUsername    != null) prefs[USERNAME_KEY]     = newUsername    else prefs.remove(USERNAME_KEY)
+            if (newDisplayName != null) prefs[DISPLAY_NAME_KEY] = newDisplayName else prefs.remove(DISPLAY_NAME_KEY)
+        }
+    }
+
+    /**
      * Erases the token from memory and DataStore and deactivates the session.
      *
      * Safe to call from a coroutine context.  Also clears [OrderSession] so
@@ -118,9 +156,15 @@ object SessionManager {
      * code belongs here.
      */
     suspend fun clearSession() {
-        token = null
+        token       = null
+        username    = null
+        displayName = null
         OrderSession.clear()
-        appContext.dataStore.edit { prefs -> prefs.remove(TOKEN_KEY) }
+        appContext.dataStore.edit { prefs ->
+            prefs.remove(TOKEN_KEY)
+            prefs.remove(USERNAME_KEY)
+            prefs.remove(DISPLAY_NAME_KEY)
+        }
         _isLoggedIn.value = false
     }
 }

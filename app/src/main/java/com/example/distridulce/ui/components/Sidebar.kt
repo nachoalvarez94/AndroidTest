@@ -11,16 +11,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.PermanentDrawerSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,15 +34,18 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.distridulce.navigation.Screen
 import com.example.distridulce.navigation.navigateTopLevel
+import com.example.distridulce.session.SessionManager
 import com.example.distridulce.ui.theme.BrandBlue
 import com.example.distridulce.ui.theme.IconBgBlue
 import com.example.distridulce.ui.theme.TextSecondary
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Sidebar(navController: NavController) {
     val backStackEntry = navController.currentBackStackEntryAsState()
-    val currentRoute = backStackEntry.value?.destination?.route
+    val currentRoute   = backStackEntry.value?.destination?.route
+    val scope          = rememberCoroutineScope()
 
     PermanentDrawerSheet(
         modifier = Modifier.width(240.dp),
@@ -100,47 +106,67 @@ fun Sidebar(navController: NavController) {
         Divider(color = MaterialTheme.colorScheme.outline)
 
         SidebarUser(
-            name  = "Admin",
-            email = "admin@distridulce.com"
+            name     = SessionManager.displayName ?: SessionManager.username ?: "Usuario",
+            subtitle = SessionManager.username?.takeIf { it != SessionManager.displayName } ?: "",
+            onLogout = { scope.launch { SessionManager.clearSession() } }
         )
     }
 }
 
 @Composable
-private fun SidebarUser(name: String, email: String) {
+private fun SidebarUser(
+    name:     String,
+    subtitle: String,
+    onLogout: () -> Unit
+) {
     Row(
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+        modifier          = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Avatar circle
+        // ── Avatar circle ─────────────────────────────────────────────────────
         Box(
-            modifier = Modifier
+            modifier         = Modifier
                 .size(36.dp)
                 .clip(CircleShape)
                 .background(IconBgBlue),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Filled.Person,
+                imageVector        = Icons.Filled.Person,
                 contentDescription = null,
-                tint = BrandBlue,
-                modifier = Modifier.size(20.dp)
+                tint               = BrandBlue,
+                modifier           = Modifier.size(20.dp)
             )
         }
 
         Spacer(modifier = Modifier.width(10.dp))
 
-        Column {
+        // ── Name / subtitle ───────────────────────────────────────────────────
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = name,
-                style = MaterialTheme.typography.labelLarge,
+                text       = name,
+                style      = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
+                color      = MaterialTheme.colorScheme.onSurface,
+                maxLines   = 1
             )
-            Text(
-                text = email,
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text     = subtitle,
+                    style    = MaterialTheme.typography.labelSmall,
+                    color    = TextSecondary,
+                    maxLines = 1
+                )
+            }
+        }
+
+        // ── Logout button ─────────────────────────────────────────────────────
+        IconButton(onClick = onLogout) {
+            Icon(
+                imageVector        = Icons.Filled.ExitToApp,
+                contentDescription = "Cerrar sesión",
+                tint               = TextSecondary,
+                modifier           = Modifier.size(20.dp)
             )
         }
     }

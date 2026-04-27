@@ -31,5 +31,11 @@ object AuthRepository {
     suspend fun login(username: String, password: String): Result<Unit> = runCatching {
         val response = api.login(LoginRequestDto(username, password))
         SessionManager.saveToken(response.token)
+        // Persist optional user info returned by the backend.
+        // nombre is preferred as display name; falls back to username if absent.
+        SessionManager.saveUserInfo(
+            newUsername    = response.username,
+            newDisplayName = response.nombre ?: response.username
+        )
     }
 }

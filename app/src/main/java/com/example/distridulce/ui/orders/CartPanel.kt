@@ -19,6 +19,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -33,11 +36,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,6 +59,17 @@ import com.example.distridulce.ui.theme.BrandBlue
 import com.example.distridulce.ui.theme.IconBgBlue
 import com.example.distridulce.ui.theme.TextPrimary
 import com.example.distridulce.ui.theme.TextSecondary
+
+// ── Quantity format helper ─────────────────────────────────────────────────────
+
+/**
+ * Formats a Double quantity for display: whole numbers without decimal point,
+ * fractional values with one decimal place.
+ * Accessible from sibling files in the same package (e.g. CheckoutScreen).
+ */
+fun formatQty(qty: Double): String =
+    if (qty == kotlin.math.floor(qty) && !qty.isInfinite()) qty.toLong().toString()
+    else "%.1f".format(qty)
 
 // ── Cart panel ────────────────────────────────────────────────────────────────
 
@@ -61,6 +84,7 @@ fun CartPanel(
     cartItems: List<CartItem>,
     onIncrement: (String) -> Unit,
     onDecrement: (String) -> Unit,
+    onSetQuantity: (String, Double) -> Unit,
     onRemove: (String) -> Unit,
     onConfirm: () -> Unit = {}
 ) {
@@ -86,10 +110,11 @@ fun CartPanel(
                 ) {
                     itemsIndexed(items = cartItems, key = { _, item -> item.key }) { index, item ->
                         CartItemCard(
-                            item = item,
-                            onIncrement = { onIncrement(item.key) },
-                            onDecrement = { onDecrement(item.key) },
-                            onRemove    = { onRemove(item.key) }
+                            item          = item,
+                            onIncrement   = { onIncrement(item.key) },
+                            onDecrement   = { onDecrement(item.key) },
+                            onSetQuantity = { qty -> onSetQuantity(item.key, qty) },
+                            onRemove      = { onRemove(item.key) }
                         )
                         if (index < cartItems.lastIndex) {
                             Divider(
@@ -210,6 +235,7 @@ fun CartItemCard(
     item: CartItem,
     onIncrement: () -> Unit,
     onDecrement: () -> Unit,
+    onSetQuantity: (Double) -> Unit,
     onRemove: () -> Unit
 ) {
     Row(
@@ -239,19 +265,20 @@ fun CartItemCard(
             )
         }
 
-        // Quantity controls
-        QuantityControl(
-            quantity = item.quantity,
-            onIncrement = onIncrement,
-            onDecrement = onDecrement
+        // Quantity controls — editable text field + +/- buttons
+        EditableQuantityControl(
+            quantity      = item.quantity,
+            onIncrement   = onIncrement,
+            onDecrement   = onDecrement,
+            onSetQuantity = onSetQuantity
         )
 
-        // Line total
+        // Line total (negative when quantity is negative → shown as "€-X.XX")
         Text(
             text = "€%.2f".format(item.lineTotal),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
-            color = BrandBlue,
+            color = if (item.lineTotal >= 0) BrandBlue else Color(0xFFDC2626),
             textAlign = TextAlign.End,
             modifier = Modifier.defaultMinSize(minWidth = 56.dp)
         )
@@ -271,14 +298,48 @@ fun CartItemCard(
     }
 }
 
-// ── Quantity control ──────────────────────────────────────────────────────────
+// ── Editable quantity control ─────────────────────────────────────────────────
 
+/**
+ * [-] [editable quantity field] [+] row.
+ *
+ * - The TextField accepts integers, decimals (comma or period), and negative values.
+ * - While focused, intermediate states (empty, "-") are preserved.
+ * - On blur: valid values are committed via [onSetQuantity]; invalid input is
+ *   restored to the previous [quantity].
+ * - Pressing Done on the keyboard clears focus, triggering the blur-commit path.
+ * - Pressing [-] or [+] always acts on the committed quantity, even while typing.
+ */
 @Composable
-private fun QuantityControl(
-    quantity: Int,
+private fun EditableQuantityControl(
+    quantity: Double,
     onIncrement: () -> Unit,
-    onDecrement: () -> Unit
+    onDecrement: () -> Unit,
+    onSetQuantity: (Double) -> Unit
 ) {
+    // rawText holds what is displayed in the field.
+    // Re-synced from quantity whenever quantity changes externally AND the field
+    // is not focused (i.e. the user is not mid-edit).
+    var rawText  by remember { mutableStateOf(formatQty(quantity)) }
+    var isFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(quantity) {
+        if (!isFocused) rawText = formatQty(quantity)
+    }
+
+    val focusManager = LocalFocusManager.current
+
+    fun commitText() {
+        val parsed = rawText.replace(",", ".").toDoubleOrNull()
+        isFocused = false
+        if (parsed == null || parsed.isNaN() || parsed.isInfinite()) {
+            rawText = formatQty(quantity)   // restore — invalid input
+        } else {
+            onSetQuantity(parsed)
+            rawText = formatQty(parsed)     // normalize display (e.g. "3." → "3")
+        }
+    }
+
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
@@ -301,14 +362,38 @@ private fun QuantityControl(
             )
         }
 
-        Text(
-            text = "$quantity",
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
+        BasicTextField(
+            value = rawText,
+            onValueChange = { new ->
+                // Accept empty, lone minus sign, or any partial decimal string.
+                if (new.isEmpty() || new == "-" ||
+                    new.matches(Regex("-?[0-9]*[.,]?[0-9]*"))) {
+                    rawText = new
+                }
+            },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = FontWeight.Bold,
+                textAlign  = TextAlign.Center,
+                color      = TextPrimary
+            ),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Decimal,
+                imeAction    = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(
+                onDone = { focusManager.clearFocus() }
+            ),
             modifier = Modifier
-                .defaultMinSize(minWidth = 28.dp)
-                .padding(horizontal = 2.dp)
+                .defaultMinSize(minWidth = 44.dp)
+                .padding(horizontal = 4.dp)
+                .onFocusChanged { state ->
+                    if (state.isFocused) {
+                        isFocused = true
+                    } else if (isFocused) {
+                        commitText()
+                    }
+                }
         )
 
         IconButton(
@@ -334,7 +419,7 @@ private fun QuantityControl(
 @Composable
 fun OrderSummaryPanel(
     enabled: Boolean,
-    totalItems: Int,
+    totalItems: Double,
     totalAmount: Double,
     onConfirm: () -> Unit,
     modifier: Modifier = Modifier
@@ -359,7 +444,7 @@ fun OrderSummaryPanel(
                 color = TextSecondary
             )
             Text(
-                text = "$totalItems uds.",
+                text = "${formatQty(totalItems)} uds.",
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.SemiBold,
                 color = TextPrimary
